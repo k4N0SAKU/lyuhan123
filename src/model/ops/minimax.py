@@ -126,43 +126,46 @@ def remez(t: Callable[[np.ndarray], np.ndarray], lo: float, hi: float, degree: i
 
 
 def build_all() -> dict:
-    """生成 §7 全部近似系数并写入 data/minimax/poly_approx.json。
+    """生成全部近似系数（归一化域 [-1,1] 拟合）并写入 data/minimax/poly_approx.json。
 
-    P2-R1 实测校准（B1 项核心发现）：P1 §7 的理论误差界系统性低估 3~4 个
-    数量级，最终配置以实测为准：
-    - GELU：deg15 @[-6,6]（P1 声称 deg5 ≤5e-3，实测 deg5 真实 0.231）；
-    - exp：**单侧域 [-10,0]**（max 减法后 y−max≤0；另修正 P1 域推导算术错：
-      score std=1 而非 8）deg9 实测 6.8e-5（远优于 3e-3 目标）；
-    - inv：deg2 @[1,64] 相对误差 0.77 → Newton 需 **7 轮**（P1 写 3-4 轮）；
-    - inv-sqrt：升 deg4（相对 0.115）保持 3 轮 Newton。
+    P3 修订：归一化域拟合消除 Horner 截断误差的 |x|^k 放大（原域 deg15 在
+    |x|>1 处发散）。exp 域 [-16,0]（C-S 界 + 公开移位 −8）；inv 域 [0.05,320]
+    （覆盖 softmax 行和范围），deg4 + 12 轮 Newton。
     """
     specs = {}
 
-    # GELU deg15 @[-6,6]（绝对误差；deg5 实测 0.231 不可用）
-    c, e = remez(_gelu, -6.0, 6.0, 15)
-    specs["gelu_deg15"] = {"coeffs": c.tolist(), "domain": [-6.0, 6.0],
-                           "kind": "abs", "max_error": e}
-    # 低成本变体（精度换门数，P3 端到端回归 A/B 用）
-    c, e = remez(_gelu, -6.0, 6.0, 9)
-    specs["gelu_deg9"] = {"coeffs": c.tolist(), "domain": [-6.0, 6.0],
-                          "kind": "abs", "max_error": e}
+    def _fit(name, target, lo, hi, degree, weight=None, extra=None):
+        mid, half = (lo + hi) / 2, (hi - lo) / 2
+        tgt = lambda tt: target(mid + half * tt)  # noqa: E731
+        c, e = remez(tgt, -1.0, 1.0, degree,
+                     weight=(lambda tt: weight(mid + half * tt)) if weight else None)
+        entry = {"coeffs": c.tolist(), "domain": [lo, hi], "normalized": True,
+                 "mid": mid, "half": half, "max_error": e}
+        if extra:
+            entry.update(extra)
+        return name, entry
 
-    # exp deg9 @[-10,0]（单侧域；max 减法保证）
-    c, e = remez(np.exp, -10.0, 0.0, 9)
-    specs["exp_deg9_onesided"] = {"coeffs": c.tolist(), "domain": [-10.0, 0.0],
-                                  "kind": "abs", "max_error": e}
+    specs.update([_fit("gelu_deg15", _gelu, -6, 6, 15)])
+    specs.update([_fit("gelu_deg9", _gelu, -6, 6, 9)])
+    specs.update([_fit("exp_deg12_onesided", np.exp, -16, 0, 12)])
+    specs.update([_fit("inv_init_deg4", lambda s: 1.0/s, 0.05, 320, 4,
+                       weight=lambda s: s, extra={"newton_rounds": 12})])
+    specs.update([_fit("invsqrt_init_deg4", lambda v: 1.0/np.sqrt(v), 0.5, 16, 4,
+                       weight=lambda v: np.sqrt(v), extra={"newton_rounds": 3})])
 
-    # inv 初值 deg2 @[1,64]（相对误差 |p·s−1|；实测 0.77 → Newton 7 轮）
-    c, e = remez(lambda s: 1.0 / s, 1.0, 64.0, 2, weight=lambda s: s)
-    specs["inv_init_deg2"] = {"coeffs": c.tolist(), "domain": [1.0, 64.0],
-                              "kind": "rel", "max_error": e,
-                              "newton_rounds": 7}
-
-    # inv-sqrt 初值 deg4 @[0.5,16]（相对误差；实测 0.115 → Newton 3 轮）
-    c, e = remez(lambda v: 1.0 / np.sqrt(v), 0.5, 16.0, 4, weight=lambda v: np.sqrt(v))
-    specs["invsqrt_init_deg4"] = {"coeffs": c.tolist(), "domain": [0.5, 16.0],
-                                  "kind": "rel", "max_error": e,
-                                  "newton_rounds": 3}
+    for name, sp in specs.items():
+        lo, hi = sp["domain"]
+        x = np.linspace(lo, hi, 100001)
+        t = (x - sp["mid"]) / sp["half"]
+        pv = np.polynomial.polynomial.polyval(t, sp["coeffs"])
+        if name.startswith("gelu"):
+            sp["max_error"] = float(np.abs(pv - _gelu(x)).max())
+        elif name.startswith("exp"):
+            sp["max_error"] = float(np.abs(pv - np.exp(x)).max())
+        elif "inv_init" in name:
+            sp["max_error"] = float(np.abs(pv * x - 1).max())
+        else:
+            sp["max_error"] = float(np.abs(pv * np.sqrt(x) - 1).max())
 
     DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
     DATA_PATH.write_text(json.dumps(specs, indent=2), encoding="utf-8")
