@@ -255,6 +255,13 @@ class CKKSContext:
         self._evaluator.negate(ct.raw, out)
         return CKKSCiphertext(out, level=ct.level)
 
+    def sub(self, a: "CKKSCiphertext", b: "CKKSCiphertext") -> "CKKSCiphertext":
+        """同态减法（转换出口的掩码消去 Enc(a₁+s) − Enc(s) 用，P3-R1 G 项）。"""
+        self._align_scale(a, b)
+        out = sealapi.Ciphertext()
+        self._evaluator.sub(a.raw, b.raw, out)
+        return CKKSCiphertext(out, level=max(a.level, b.level))
+
     def rotate(self, ct: "CKKSCiphertext", steps: int) -> "CKKSCiphertext":
         """槽旋转：**左移**语义 res[s] = v[s+steps]（P2 探针实测）。"""
         out = sealapi.Ciphertext()

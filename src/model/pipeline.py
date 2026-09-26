@@ -8,6 +8,12 @@
 MpcEnv 如实记账 Beaver 门数与通信字节，数值精度为 numpy 全精度；基础算子的
 真实 MPC 定点求值精度由 test_mpc_ops.py 独立验证。中间态解密调试功能由
 环境变量 A122_DEBUG_INTERMEDIATE 控制（默认关闭，演示/评测模式禁用）。
+
+P3-R1 结构修复：初版实现缺失 post-LN 的两个 LayerNorm 转换点，且残差加的
+输出直接进入下一个线性段——破坏双拷贝布局不变量（proj 后半槽是 BSGS 垃圾 +
+残差拷贝 ≠ 和的拷贝，FFN1 环绕项读到垃圾）。修复后每个线性段的输入都是
+转换出口的 fresh 双拷贝密文（docs/01 §7.4 出口编码免费重置），LN 作为转换点
+补齐（门数按 §7.3 预算记账）。
 """
 from __future__ import annotations
 
@@ -24,7 +30,7 @@ from src.common.perf import (SEG_COMPUTE_LINEAR, SEG_COMPUTE_NONLINEAR,
                              NetworkMeter, RoundContext)
 from src.crypto.ckks_ops import CKKSContext, CKKSCiphertext, PARAMS_MODE_B
 from src.crypto.secret_sharing import DEFAULT_MODULUS, sample_fresh_mask
-from src.model.loader import BertSentimentPipeline
+from src.model.loader import LABEL_MAP, BertSentimentPipeline
 from src.model.ops.linear import embed_and_encrypt
 from src.model.ops.packing import (DEFAULT_SPEC, PackingSpec,
                                    build_diagonal_plaintexts, layout_input,
@@ -75,127 +81,202 @@ class ModeBPipeline:
     def _convert_to_shares(self, ct: CKKSCiphertext,
                            ctx: RoundContext) -> List[int]:
         """转换入口（docs/01 §7.4）：P2 fresh 掩码 r → ct+Enc(r) → P0 解密得
-        x+r → 分发 y₁；P2 持 −r。模拟层：掩码加法在解密后本地执行。"""
+        x+r → 分发 y₁；P2 持 −r。
+
+        ⚠️ 模拟捷径（P3-R1 G③）：真实协议须在**密文域**加 Enc_pk(r) 后交 P0
+        解密（D5 白名单执行点）；本模拟层在解密后本地加掩码——数值语义一致
+        （P0 视角仍只见 x+r），真实路径在 P4 协议层落地。"""
         with ctx.timer.segment("convert_mask_decrypt"):
             r = sample_fresh_mask(1)[0]
             self.stats.masks_generated += 1
             y = self.ctx.decrypt(ct)
         with ctx.timer.segment("convert_share"):
-            vals = [int(round(v * (1 << 16)) + r) % DEFAULT_MODULUS for v in y]
+            # P1 视角：y₁ = x·2¹⁶ + r（OTP，r ∈ [0,2⁶⁴)）；重构 = y₁ + (−r)。
+            # P3-R1 修复：初版返回带掩码的 y₁ 且管线直接消费（掩码从未移除，
+            # r~2⁶³ → /2¹⁶ 后 ~1e13 垃圾）——模拟器持双方视图，返回重构值。
+            vals = [(int(round(v * (1 << 16)) + r) - r) % DEFAULT_MODULUS for v in y]
             self.stats.conversions += 1
             self.stats.net.on_send(len(vals) * 8)
         return vals
 
     def _recrypt(self, real: List[float], ctx: RoundContext) -> CKKSCiphertext:
-        """转换出口（再随机化）：P1 fresh 掩码 s → 加密后 P2 密文域操作 →
-        fresh 顶层密文；布局由 P1 编码免费重置。"""
+        """转换出口（docs/01 §7.4 再随机化）：P1 fresh 掩码 s → Enc(a₁+s) 与
+        Enc(s) → P2 密文域相减 → fresh 顶层密文；布局由 P1 编码免费重置。
+
+        模拟层实现（P3-R1 G①②修正）：掩码 s 由 os.urandom 生成并**真实参与
+        同态消去**——Enc(real+s) − Enc(s) = Enc(real)（CKKS 同态减法），
+        修复初版"s 生成后未使用却计数"的装饰性记账；掩码为浮点域（真实协议
+        为 Q16 定点分享域，其 mod 2⁶⁴ 溢出控制是 P4 协议层工程点——CrypTFlow
+        式处理），模拟层数值语义一致。"""
         with ctx.timer.segment("convert_recrypt"):
-            import random
-            s = random.randrange(1, DEFAULT_MODULUS)
+            s = _fresh_float_mask(len(real))                   # S3：os.urandom
             self.stats.masks_generated += 1
-            ct = self.ctx.encrypt_vector(real)
+            ct_masked = self.ctx.encrypt_vector([v + m for v, m in zip(real, s)])
+            ct_s = self.ctx.encrypt_vector(s)
+            ct = self.ctx.sub(ct_masked, ct_s)                 # 密文域掩码消去
             self.stats.conversions += 1
-            self.stats.net.on_send(ct.size_bytes)
+            self.stats.net.on_send(ct_masked.size_bytes + ct_s.size_bytes)
         return ct
 
-    def _layer(self, li: int, ct_in: CKKSCiphertext,
-               token_ids: List[int], ctx: RoundContext) -> CKKSCiphertext:
+    def _add_bias(self, ct: CKKSCiphertext, bias: "np.ndarray", L: int) -> CKKSCiphertext:
+        """加偏置（transformers Linear 的 b）：按 token 块布局 add_plain（level 不变）。"""
+        bias_layout = layout_input([bias for _ in range(L)], L, self.spec)
+        return self.ctx.add_plain(ct, bias_layout)
+
+
+    def _valid_blocks(self, ct: CKKSCiphertext, ctx: RoundContext,
+                      L: int) -> "np.ndarray":
+        """转换 + **按块提取有效槽**：gap-block 布局下每块前 d 槽为有效值，
+        其余为 BSGS 垃圾——P3-R1 修复：初版 `[:L*d]` 连续切片把垃圾槽混入
+        token 矩阵（L=2 即开始读垃圾行，是残差/分类漂移的根源）。"""
+        d = self.spec.block_elems
+        bs = self.spec.block_slots
+        arr = np.array(_from_mod(self._convert_to_shares(ct, ctx)))
+        return np.stack([arr[b * bs:b * bs + d] for b in range(L)])
+
+    def _layer(self, x_ct: CKKSCiphertext, x_vals: "np.ndarray", li: int,
+               ctx: RoundContext) -> "np.ndarray":
+        """单层（post-LN BERT，docs/01 §4.3 模式 B 时序）：
+
+        QKV 密文线性（fresh level0→1）→ 转换 → MPC 注意力 → 转换出口重加密
+        → proj 线性 → 转换 → 残差加（MPC 免费加法）+ LN1（转换点）→ FFN1
+        → 转换 → GELU → FFN2 → 转换 → 残差加 + LN2 → 下一层输入（values）。
+
+        布局不变量（P3-R1 修复）：每个线性段的输入都是转换出口的 fresh
+        **双拷贝**密文（docs/01 §7.4 出口编码免费重置）——初版实现让残差加的
+        输出直接进入下一个线性，破坏双拷贝（proj 后半槽 BSGS 垃圾 + 残差拷贝
+        ≠ 和的拷贝），FFN1 环绕项读到垃圾（实测 err 0.21 / 全层 1e13）。"""
         layer = self.model.bert.encoder.layer[li]
         L = self.cfg.seq_tokens
         d = self.spec.block_elems
+        head = d // 12
 
-        # --- 段 1（密文）：Q/K/V 线性 ---
+        # --- 段 1（密文，level0→1）：Q/K/V 三线性（含 bias）---
         with ctx.timer.segment(SEG_COMPUTE_LINEAR):
-            W_q = layer.attention.self.query.weight.detach().numpy().T
-            W_k = layer.attention.self.key.weight.detach().numpy().T
-            W_v = layer.attention.self.value.weight.detach().numpy().T
-            q_ct = linear_cipher(self.ctx, ct_in, W_q, L, self.spec,
-                                 diagonals=self._diags(W_q))
-            k_ct = linear_cipher(self.ctx, ct_in, W_k, L, self.spec,
-                                 diagonals=self._diags(W_k))
-            v_ct = linear_cipher(self.ctx, ct_in, W_v, L, self.spec,
-                                 diagonals=self._diags(W_v))
+            W_q = layer.attention.self.query.weight.detach().numpy()
+            W_k = layer.attention.self.key.weight.detach().numpy()
+            W_v = layer.attention.self.value.weight.detach().numpy()
+            q_ct = self._add_bias(
+                linear_cipher(self.ctx, x_ct, W_q, L, self.spec,
+                              diagonals=self._diags(W_q)),
+                layer.attention.self.query.bias.detach().numpy(), L)
+            k_ct = self._add_bias(
+                linear_cipher(self.ctx, x_ct, W_k, L, self.spec,
+                              diagonals=self._diags(W_k)),
+                layer.attention.self.key.bias.detach().numpy(), L)
+            v_ct = self._add_bias(
+                linear_cipher(self.ctx, x_ct, W_v, L, self.spec,
+                              diagonals=self._diags(W_v)),
+                layer.attention.self.value.bias.detach().numpy(), L)
 
         # --- 转换 + MPC 域注意力（reveal-compute-reshare）---
         with ctx.timer.segment(SEG_COMPUTE_NONLINEAR):
-            q_v = self._convert_to_shares(q_ct, ctx)
-            k_v = self._convert_to_shares(k_ct, ctx)
-            v_v = self._convert_to_shares(v_ct, ctx)
-            q_f = np.array(_from_mod(q_v[:L * d])).reshape(L, d)
-            k_f = np.array(_from_mod(k_v[:L * d])).reshape(L, d)
-            v_f = np.array(_from_mod(v_v[:L * d])).reshape(L, d)
+            q_f = self._valid_blocks(q_ct, ctx, L)
+            k_f = self._valid_blocks(k_ct, ctx, L)
+            v_f = self._valid_blocks(v_ct, ctx, L)
             attn_out = np.zeros((L, d))
-            head = d // 12
             for h in range(12):
                 q_h = q_f[:, h * head:(h + 1) * head]
                 k_h = k_f[:, h * head:(h + 1) * head]
                 v_h = v_f[:, h * head:(h + 1) * head]
                 scores = q_h @ k_h.T / np.sqrt(head)
-                probs = ref_softmax_row(scores)
+                probs = ref_softmax_row(scores - 8.0)   # 公开移位（C-S 界 |score|≤8）
                 attn_out[:, h * head:(h + 1) * head] = probs @ v_h
-            # 门数记账：QK^T L²·head + softmax L·51 + ·V L²·head（每 head）
-            self.env.gates_used += 12 * (2 * L * L * head + L * 51)
-            self.env.comm_bytes += self.env.gates_used * 32
+            # 门数记账（公开移位口径）：QK^T/·V 各 L²·head/头 + softmax
+            # 每行 exp 4/元素×L + inv(1+2×12)=25 → 12·L·(4L+25)
+            self.env.gates_used += 12 * (2 * L * L * head + L * (4 * L + 25))
+            self.env.comm_bytes += 12 * L * (4 * L + 25) * 32
 
-        # --- 段 2（密文）：proj + 残差 ---
+        # --- 段 2（密文）：proj 线性（输入 = 转换出口 fresh 双拷贝）---
         with ctx.timer.segment(SEG_COMPUTE_LINEAR):
-            W_proj = layer.attention.output.dense.weight.detach().numpy().T
-            attn_layout = layout_input([attn_out[i] for i in range(L)], L, self.spec)
-            ct_attn = self.ctx.encrypt_vector(attn_layout)
-            proj = linear_cipher(self.ctx, ct_attn, W_proj, L, self.spec,
-                                 diagonals=self._diags(W_proj))
-            emb = self.model.embeddings.word_embeddings.weight.detach().numpy()
-            res_layout = layout_input([emb[t] for t in token_ids], L, self.spec)
-            residual = self.ctx.encrypt_vector(res_layout)
-            residual_sw = self.ctx.mod_switch_to(residual, proj.level)
-            h = self.ctx.add(proj, residual_sw)
+            attn_ct = self._recrypt(
+                layout_input([attn_out[i] for i in range(L)], L, self.spec), ctx)
+            W_proj = layer.attention.output.dense.weight.detach().numpy()
+            proj_ct = self._add_bias(
+                linear_cipher(self.ctx, attn_ct, W_proj, L, self.spec,
+                              diagonals=self._diags(W_proj)),
+                layer.attention.output.dense.bias.detach().numpy(), L)
 
-        # --- FFN（密文段）---
-        with ctx.timer.segment(SEG_COMPUTE_LINEAR):
-            W_ffn1 = layer.intermediate.dense.weight.detach().numpy().T[:, :d]
-            ffn1 = linear_cipher(self.ctx, h, W_ffn1, L, self.spec,
-                                 diagonals=self._diags(W_ffn1))
-
+        # --- 转换：proj 揭示 → 残差加（免费）→ LN1（门记账）→ 出口重加密 ---
         with ctx.timer.segment(SEG_COMPUTE_NONLINEAR):
-            inter_vals = self._convert_to_shares(ffn1, ctx)
-            inter_f = np.array(_from_mod(inter_vals[:L * d]))
-            gelu_f = ref_gelu(inter_f)
+            proj_vals = self._valid_blocks(proj_ct, ctx, L)
+            h_raw = proj_vals + x_vals
+            with torch.inference_mode():
+                h = layer.attention.output.LayerNorm(
+                    torch.tensor(h_raw, dtype=torch.float32).unsqueeze(0)).squeeze(0).numpy()
+            self.env.gates_used += h.size * 8            # docs/01 §7.3 LN 门预算
+            self.env.comm_bytes += h.size * 8 * 32
+        with ctx.timer.segment(SEG_ENCRYPT):
+            h_ct = self._recrypt(
+                layout_input([h[i] for i in range(L)], L, self.spec), ctx)
 
+        # --- 段 3（密文）：FFN1（截断 768→768，模拟口径）---
         with ctx.timer.segment(SEG_COMPUTE_LINEAR):
-            gelu_layout = layout_input(
-                [gelu_f.reshape(L, d)[i] for i in range(L)], L, self.spec)
-            ct_gelu = self.ctx.encrypt_vector(gelu_layout)
-            W_ffn2 = layer.output.dense.weight.detach().numpy().T[:d, :]
-            ffn2 = linear_cipher(self.ctx, ct_gelu, W_ffn2, L, self.spec,
-                                 diagonals=self._diags(W_ffn2))
-            h_sw = self.ctx.mod_switch_to(h, ffn2.level)
-            out = self.ctx.add(ffn2, h_sw)
-        return out
+            W_ffn1 = layer.intermediate.dense.weight.detach().numpy()[:d, :]
+            ffn1_ct = self._add_bias(
+                linear_cipher(self.ctx, h_ct, W_ffn1, L, self.spec,
+                              diagonals=self._diags(W_ffn1)),
+                layer.intermediate.dense.bias.detach().numpy()[:d], L)
+
+        # --- 转换 + GELU ---
+        with ctx.timer.segment(SEG_COMPUTE_NONLINEAR):
+            ffn1_vals = self._valid_blocks(ffn1_ct, ctx, L)
+            gelu_f = ref_gelu(ffn1_vals)
+            self.env.gates_used += gelu_f.size * 13      # deg15（P2-R1 校准）
+            self.env.comm_bytes += gelu_f.size * 13 * 32
+        with ctx.timer.segment(SEG_ENCRYPT):
+            gelu_ct = self._recrypt(
+                layout_input([gelu_f[i] for i in range(L)], L, self.spec), ctx)
+
+        # --- 段 4（密文）：FFN2 ---
+        with ctx.timer.segment(SEG_COMPUTE_LINEAR):
+            W_ffn2 = layer.output.dense.weight.detach().numpy()[:, :d]
+            ffn2_ct = self._add_bias(
+                linear_cipher(self.ctx, gelu_ct, W_ffn2, L, self.spec,
+                              diagonals=self._diags(W_ffn2)),
+                layer.output.dense.bias.detach().numpy(), L)
+
+        # --- 转换：残差加 + LN2 → 下一层输入 ---
+        with ctx.timer.segment(SEG_COMPUTE_NONLINEAR):
+            ffn2_vals = self._valid_blocks(ffn2_ct, ctx, L)
+            z_raw = ffn2_vals + h
+            with torch.inference_mode():
+                z = layer.output.LayerNorm(
+                    torch.tensor(z_raw, dtype=torch.float32).unsqueeze(0)).squeeze(0).numpy()
+            self.env.gates_used += z.size * 8
+            self.env.comm_bytes += z.size * 8 * 32
+        return z
 
     def classify(self, text: str, ctx: Optional[RoundContext] = None) -> dict:
-        """端到端：嵌入加密 → N 层 → P0 掩码解密 CLS → 明文池化/分类头。"""
+        """端到端：嵌入（P0 本地，含位置/LN）→ N 层密文管线 → CLS 隐藏态
+        → 明文池化/分类头。最终隐藏态为 LN2 转换出口值（P0 白名单内，D5）。"""
         ctx = ctx or RoundContext(index=0)
         enc = self.tok(text, truncation=True, max_length=self.cfg.seq_tokens,
-                       return_tensors="np")
-        token_ids = [int(t) for t in enc["input_ids"][0]][:self.cfg.seq_tokens]
-        while len(token_ids) < self.cfg.seq_tokens:
-            token_ids.append(0)
+                       return_tensors="pt")
         t0 = time.perf_counter()
         with ctx.timer.segment(SEG_ENCRYPT):
-            emb = self.model.embeddings.word_embeddings.weight.detach().numpy()
-            ct = embed_and_encrypt(self.ctx, token_ids, emb, self.spec)
-        x = ct
+            with torch.inference_mode():
+                x = self.model.bert.embeddings(enc["input_ids"])  # (1,L,d) 含位置/LN
+            x_vals = x.squeeze(0).numpy()
+            x_ct = self.ctx.encrypt_vector(
+                layout_input([x_vals[i] for i in range(self.cfg.seq_tokens)],
+                             self.cfg.seq_tokens, self.spec))
         for li in range(self.cfg.n_layer):
-            x = self._layer(li, x, token_ids, ctx)
+            x_vals = self._layer(x_ct, x_vals, li, ctx)
+            if li < self.cfg.n_layer - 1:
+                with ctx.timer.segment(SEG_ENCRYPT):
+                    x_ct = self._recrypt(
+                        layout_input([x_vals[i] for i in range(self.cfg.seq_tokens)],
+                                     self.cfg.seq_tokens, self.spec), ctx)
         with ctx.timer.segment(SEG_THRESH_DECRYPT):
-            cls = self.ctx.decrypt(x)[:1]        # P0 白名单解密（D5 修订）
+            cls = x_vals[0]                       # P0 白名单内（LN2 出口值，D5）
         with torch.inference_mode():
-            hidden = torch.tensor(cls).unsqueeze(0)
+            hidden = torch.tensor(cls, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
             pooled = self.model.bert.pooler(hidden)
             logits = self.model.classifier(pooled)
             probs = torch.softmax(logits, dim=-1)[0]
             idx = int(probs.argmax())
-        return {"label": self.plain.LABEL_MAP[idx], "prob": float(probs[idx]),
+        return {"label": LABEL_MAP[idx], "prob": float(probs[idx]),
                 "conversions": self.stats.conversions,
                 "mpc_gates": self.env.gates_used,
                 "mpc_comm_bytes": self.env.comm_bytes,
@@ -209,4 +290,13 @@ def _from_mod(vals: List[int]) -> List[float]:
         if s > DEFAULT_MODULUS // 2:
             s -= DEFAULT_MODULUS
         out.append(s / (1 << 16))
+    return out
+
+
+def _fresh_float_mask(n: int, scale: float = 1.0) -> List[float]:
+    """os.urandom 均匀浮点掩码（S3 纪律；转换出口再随机化用）。"""
+    out = []
+    for _ in range(n):
+        raw = int.from_bytes(os.urandom(8), "big") >> 11   # 53-bit 尾数
+        out.append((raw / (1 << 53)) * scale)
     return out

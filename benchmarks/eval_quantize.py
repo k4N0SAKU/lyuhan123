@@ -105,6 +105,8 @@ def main() -> int:
                              "在 ~1e-5 量级 logit 近并列处可能翻转，默认 16，范围 2^15"
                              "仍覆盖激活/logits 量级且实测一致率 1.0）")
     parser.add_argument("--max-new-tokens", type=int, default=16)
+    parser.add_argument("--long", action="store_true",
+                        help="使用 220 条扩测 prompt 集（P3-R1 [K] 项，data/demo/prompts_200.txt）")
     args = parser.parse_args()
 
     from src.common.envinfo import collect_environment
@@ -127,7 +129,8 @@ def main() -> int:
                                 quantizer=FixedPointQuantizer(frac_bits=args.frac_bits))
     print(f"gpt2 quantized weight tensors: {q_gpt2.quant_stats}")
 
-    prompts = load_prompt_lines(DATA_DIR / "prompts.txt")
+    prompt_file = ("prompts_200.txt" if args.long else "prompts.txt")
+    prompts = load_prompt_lines(REPO_ROOT / "data" / "demo" / prompt_file)
     t0 = time.perf_counter()
     gpt2_result = eval_gpt2_agreement(fp_gpt2, q_gpt2, prompts, args.max_new_tokens)
     print(f"gpt2: token_agreement={gpt2_result['token_agreement']:.4f} "
@@ -152,7 +155,8 @@ def main() -> int:
         "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "environment": collect_environment(probe_gpu=False),
         "config": {**quant_cfg, "max_new_tokens": args.max_new_tokens,
-                   "eval_set": "data/sentiment/eval.tsv"},
+                   "eval_set": "data/sentiment/eval.tsv",
+                   "prompt_file": prompt_file, "n_prompts": len(prompts)},
         "thresholds": {"min_token_agreement": MIN_AGREEMENT,
                        "max_drop_pp": MAX_DROP_PP},
         "gpt2": gpt2_result,
