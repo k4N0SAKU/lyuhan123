@@ -1,23 +1,23 @@
-"""模式 B 端到端密文推理管线（P3；BERT-base-chinese 情感分类，层数可截断）。
+"""模式 B 端到端密文推理管线（P3 实现；P4 转换真实路径接线）。
+BERT-base-chinese 情感分类，层数可截断。
 
 架构（docs/01 §6.3 段划分）：密文域线性层（P2 packing）+ 非线性 MPC 域求值。
-转换入口/出口含 fresh 掩码（docs/01 §7.4 再随机化）；P0 单钥掩码解密（D5 修订）。
+转换入口/出口为 **P4 真实路径**（docs/01 §7.4 / src/protocol/conversion.py）：
+入口 = P2 密文域加 Enc(r) → P0 白名单①掩码解密 → y₁ 分发 P1、P2 持 −r；
+出口 = P1 fresh 掩码 s → P2 密文域合成 fresh 顶层密文。三方以进程内角色直连
+（S8 模拟口径——1.6MB 密文纯 Python GCM 序列化不可行，通道承载全程由
+src/nodes e2e 以玩具参数验证）；MPC 中间仍为 reveal-compute-reshare 模拟
+（CrypTFlow/Delphi 标准仿真方法），MpcEnv 如实记账门数与字节。
+最终输出经 P0 白名单②解密（D5 执行点）；密钥分发：构造时一次密钥生成后
+私钥仅驻留 ClientRole，管线计算侧只持 public_only 上下文。
 
-模拟层声明（S8）：三方以同机回环进程内模拟（无真实 socket）；非线性函数数值
-采用 **reveal-compute-reshare** 模拟（CrypTFlow/Delphi 标准仿真方法）——
-MpcEnv 如实记账 Beaver 门数与通信字节，数值精度为 numpy 全精度；基础算子的
-真实 MPC 定点求值精度由 test_mpc_ops.py 独立验证。中间态解密调试功能由
-环境变量 A122_DEBUG_INTERMEDIATE 控制（默认关闭，演示/评测模式禁用）。
-
-P3-R1 结构修复：初版实现缺失 post-LN 的两个 LayerNorm 转换点，且残差加的
-输出直接进入下一个线性段——破坏双拷贝布局不变量（proj 后半槽是 BSGS 垃圾 +
-残差拷贝 ≠ 和的拷贝，FFN1 环绕项读到垃圾）。修复后每个线性段的输入都是
-转换出口的 fresh 双拷贝密文（docs/01 §7.4 出口编码免费重置），LN 作为转换点
-补齐（门数按 §7.3 预算记账）。
+P3-R1 结构修复（保留）：post-LN 两个 LayerNorm 转换点 + 每个线性段输入都是
+转换出口的 fresh 双拷贝密文（docs/01 §7.4 出口编码免费重置）。
 """
 from __future__ import annotations
 
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -29,13 +29,14 @@ from src.common.perf import (SEG_COMPUTE_LINEAR, SEG_COMPUTE_NONLINEAR,
                              SEG_ENCRYPT, SEG_THRESH_DECRYPT,
                              NetworkMeter, RoundContext)
 from src.crypto.ckks_ops import CKKSContext, CKKSCiphertext, PARAMS_MODE_B
-from src.crypto.secret_sharing import DEFAULT_MODULUS, sample_fresh_mask
+from src.crypto.secret_sharing import DEFAULT_MODULUS, share_vector
 from src.model.loader import LABEL_MAP, BertSentimentPipeline
 from src.model.ops.linear import embed_and_encrypt
 from src.model.ops.packing import (DEFAULT_SPEC, PackingSpec,
                                    build_diagonal_plaintexts, layout_input,
                                    linear_cipher)
 from src.model.ops.nonlinear_approx import MpcEnv, ref_gelu, ref_softmax_row
+from src.protocol.conversion import ClientRole, InferRole, KeyRole, to_fixed
 
 
 @dataclass
@@ -66,11 +67,29 @@ class ModeBPipeline:
         self.model = plain.model
         self.tok = plain.tokenizer
         self.spec = DEFAULT_SPEC
-        self.ctx = CKKSContext(PARAMS_MODE_B)
         self.env = MpcEnv()
         self.stats = ConvertStats()
         self._diag_cache: dict = {}
         self._debug = os.environ.get("A122_DEBUG_INTERMEDIATE", "") == "1"
+
+        # ---- P4 密钥分发（D5）：一次生成，私钥仅驻留 P0 角色 ----
+        full_ctx = CKKSContext(PARAMS_MODE_B)
+        self._keys_dir = tempfile.mkdtemp(prefix="a122_p4_keys_")
+        full_ctx.save_keys(self._keys_dir, with_secret=True)
+        del full_ctx                                    # 私钥仅经文件交给 P0 角色
+        self.ctx = CKKSContext(PARAMS_MODE_B, public_only=True,
+                               keys_dir=self._keys_dir)  # P2 计算侧（无私钥）
+        self._decrypt_events: List[dict] = []
+
+        def _audit(event: str, detail: dict) -> None:
+            self._decrypt_events.append({"event": event, **detail})
+
+        self.client = ClientRole(
+            CKKSContext(PARAMS_MODE_B, public_only=False,
+                        keys_dir=self._keys_dir), audit=_audit)
+        # P1/P2 各持 public_only 材料（公钥相同，模拟内共享同一上下文实例）
+        self.keynode = KeyRole(self.ctx)
+        self.infer = InferRole(self.ctx)
 
     def _diags(self, W):
         key = id(W)
@@ -80,42 +99,44 @@ class ModeBPipeline:
 
     def _convert_to_shares(self, ct: CKKSCiphertext,
                            ctx: RoundContext) -> List[int]:
-        """转换入口（docs/01 §7.4）：P2 fresh 掩码 r → ct+Enc(r) → P0 解密得
-        x+r → 分发 y₁；P2 持 −r。
+        """转换入口（docs/01 §7.4 **真实路径**，P4 落地——D5 白名单①执行点）：
+        P2 fresh 全宽网格掩码 r → ct′ = ct + Enc_pk(r)（**密文域**同态加）→
+        P0 白名单门控解密 y = x + r → CONVERT_SHARE y₁ 给 P1；P2 持 −r。
 
-        ⚠️ 模拟捷径（P3-R1 G③）：真实协议须在**密文域**加 Enc_pk(r) 后交 P0
-        解密（D5 白名单执行点）；本模拟层在解密后本地加掩码——数值语义一致
-        （P0 视角仍只见 x+r），真实路径在 P4 协议层落地。"""
+        进程内角色直连（S8 模拟口径：通道承载全程由 src/nodes e2e 以玩具参数
+        验证——1.6MB 密文纯 Python GCM 序列化开销不可行，见 P4 工作记录 §3）。
+        数值语义：重构 y₁ + (−r) = x·2¹⁶（环算术精确），+e_ckks ≤1 ulp。"""
         with ctx.timer.segment("convert_mask_decrypt"):
-            r = sample_fresh_mask(1)[0]
-            self.stats.masks_generated += 1
-            y = self.ctx.decrypt(ct)
+            request_id = os.urandom(16)
+            masked = self.infer.entry(ct, request_id)      # P2：ct+Enc(r)
+            y1 = self.client.masked_decrypt(masked, request_id)  # P0：白名单门
+            self.keynode.take_entry_share(request_id, y1)  # P1：收 y₁
+            p2 = self.infer.entry_p2_share(request_id)     # P2：−r
         with ctx.timer.segment("convert_share"):
-            # P1 视角：y₁ = x·2¹⁶ + r（OTP，r ∈ [0,2⁶⁴)）；重构 = y₁ + (−r)。
-            # P3-R1 修复：初版返回带掩码的 y₁ 且管线直接消费（掩码从未移除，
-            # r~2⁶³ → /2¹⁶ 后 ~1e13 垃圾）——模拟器持双方视图，返回重构值。
-            vals = [(int(round(v * (1 << 16)) + r) - r) % DEFAULT_MODULUS for v in y]
+            vals = [(a + b) % DEFAULT_MODULUS for a, b in zip(y1, p2)]
             self.stats.conversions += 1
-            self.stats.net.on_send(len(vals) * 8)
+            self.stats.masks_generated += 1
+            self.stats.net.on_send(ct.size_bytes + len(y1) * 8)
         return vals
 
     def _recrypt(self, real: List[float], ctx: RoundContext) -> CKKSCiphertext:
-        """转换出口（docs/01 §7.4 再随机化）：P1 fresh 掩码 s → Enc(a₁+s) 与
-        Enc(s) → P2 密文域相减 → fresh 顶层密文；布局由 P1 编码免费重置。
+        """转换出口（docs/01 §7.4 **真实路径**再随机化）：P1 fresh 掩码 s →
+        z = a₁ + s（OTP）与 Enc_pk(s) → P2 密文域合成 Enc(w) − Enc(s) = Enc(v)
+        → fresh 顶层密文（深度重置）；布局由调用方的 real 排序承载。
 
-        模拟层实现（P3-R1 G①②修正）：掩码 s 由 os.urandom 生成并**真实参与
-        同态消去**——Enc(real+s) − Enc(s) = Enc(real)（CKKS 同态减法），
-        修复初版"s 生成后未使用却计数"的装饰性记账；掩码为浮点域（真实协议
-        为 Q16 定点分享域，其 mod 2⁶⁴ 溢出控制是 P4 协议层工程点——CrypTFlow
-        式处理），模拟层数值语义一致。"""
+        掩码窗 [2⁴⁶, 2⁵³−2⁴⁶)（float64 精确 + 无 mod 回绕，CrypTFlow 式溢出
+        控制——P3 docstring 预告的 P4 工程点，论证见 conversion.py）。a₁/a₂
+        为 MPC 打开阶段的结果分享（模拟层经 share_vector 重分享）。"""
         with ctx.timer.segment("convert_recrypt"):
-            s = _fresh_float_mask(len(real))                   # S3：os.urandom
-            self.stats.masks_generated += 1
-            ct_masked = self.ctx.encrypt_vector([v + m for v, m in zip(real, s)])
-            ct_s = self.ctx.encrypt_vector(s)
-            ct = self.ctx.sub(ct_masked, ct_s)                 # 密文域掩码消去
+            fixed = [to_fixed(v) for v in real]            # 值域守卫 |v|<2⁴⁶
+            a1, a2 = share_vector(fixed)                   # S8 重分享
+            request_id = os.urandom(16)
+            self.keynode.take_entry_share(request_id, a1)  # P1 持结果分享 a₁
+            z, enc_s = self.keynode.exit_prepare(request_id)   # P1：s, z, Enc(s)
+            ct = self.infer.exit_compose(request_id, enc_s, z, a2)  # P2 密文域合成
             self.stats.conversions += 1
-            self.stats.net.on_send(ct_masked.size_bytes + ct_s.size_bytes)
+            self.stats.masks_generated += 1
+            self.stats.net.on_send(len(enc_s) + len(z) * 8 + ct.size_bytes)
         return ct
 
     def _add_bias(self, ct: CKKSCiphertext, bias: "np.ndarray", L: int) -> CKKSCiphertext:
@@ -269,7 +290,16 @@ class ModeBPipeline:
                         layout_input([x_vals[i] for i in range(self.cfg.seq_tokens)],
                                      self.cfg.seq_tokens, self.spec), ctx)
         with ctx.timer.segment(SEG_THRESH_DECRYPT):
-            cls = x_vals[0]                       # P0 白名单内（LN2 出口值，D5）
+            if self.cfg.n_layer > 0:
+                # D5 白名单②执行点：LN2 出口分享 → 出口重加密（fresh ct）→
+                # P0 最终解密。真实协议中即 INFER_RESULT(P2→P0) 的载荷。
+                cls_ct = self._recrypt(
+                    layout_input([x_vals[i] for i in range(self.cfg.seq_tokens)],
+                                 self.cfg.seq_tokens, self.spec), ctx)
+                final_vals = self.client.final_decrypt(cls_ct, os.urandom(16))
+                cls = final_vals[:self.spec.block_elems]   # 块 0 有效槽 = token 0
+            else:
+                cls = x_vals[0]
         with torch.inference_mode():
             hidden = torch.tensor(cls, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
             pooled = self.model.bert.pooler(hidden)
@@ -290,13 +320,4 @@ def _from_mod(vals: List[int]) -> List[float]:
         if s > DEFAULT_MODULUS // 2:
             s -= DEFAULT_MODULUS
         out.append(s / (1 << 16))
-    return out
-
-
-def _fresh_float_mask(n: int, scale: float = 1.0) -> List[float]:
-    """os.urandom 均匀浮点掩码（S3 纪律；转换出口再随机化用）。"""
-    out = []
-    for _ in range(n):
-        raw = int.from_bytes(os.urandom(8), "big") >> 11   # 53-bit 尾数
-        out.append((raw / (1 << 53)) * scale)
     return out

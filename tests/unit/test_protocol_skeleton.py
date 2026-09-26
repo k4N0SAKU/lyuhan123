@@ -18,7 +18,8 @@ from src.model.ops.nonlinear_approx import (EXP_SPEC, GELU_SPEC, INV_SQRT_SPEC,
 from src.protocol import messages as M
 from src.protocol.audit_log import AuditLog
 from src.protocol.auth import Authenticator, NodeIdentity
-from src.protocol.keylifecycle import ROTATE_INTERVAL_ROUNDS, KeyLifecycleState
+from src.protocol.keylifecycle import (ROTATE_INTERVAL_ROUNDS, KeyLifecycleState,
+                                       KeyManager)
 from src.protocol.session import SecureChannel, Session, SessionState
 
 
@@ -72,13 +73,13 @@ class TestMessages:
         assert env.payload_type in M.PAYLOAD_REGISTRY
         assert M.PAYLOAD_REGISTRY["RecryptSharesPayload"] is M.RecryptSharesPayload
         recrypt = M.RecryptSharesPayload()
-        assert recrypt.enc_masked_share is not None and recrypt.enc_mask is not None
+        assert recrypt.enc_mask is not None and recrypt.masked_share_ints is not None
 
     def test_convert_payload_carries_mask_semantics(self):
         conv = M.ConvertMaskedCtPayload()
         assert hasattr(conv, "masked_ct") and hasattr(conv, "level")
         rec = M.RecryptSharesPayload()
-        assert hasattr(rec, "enc_masked_share") and hasattr(rec, "enc_mask")
+        assert hasattr(rec, "enc_mask") and hasattr(rec, "masked_share_ints")
 
     def test_all_payloads_are_dataclasses(self):
         for name, cls in M.PAYLOAD_REGISTRY.items():
@@ -86,10 +87,13 @@ class TestMessages:
             dataclasses.asdict(cls())
 
 
-# ---- 协议层骨架 NotImplementedError（P4 实现；P2 已实现密码层，不再断言）----
+# ---- 协议层实现锚点（P4 已实现；行为测试见 test_auth/test_session/
+#      test_keylifecycle/test_audit_log/test_conversion 与 tests/attack）----
 
-NOT_IMPL_TARGETS = [
-    ("SecureChannel", lambda: SecureChannel(),
+IMPLEMENTED_TARGETS = [
+    ("SecureChannel",
+     lambda: SecureChannel(Session(b"\x00" * 16, role=0),
+                           NodeIdentity(), KeyManager()),
      ["establish", "send_message", "recv_message", "current_seq"]),
     ("Session", lambda: Session(b"\x00" * 16, role=1),
      ["transition", "transcript_hash"]),
@@ -103,34 +107,29 @@ NOT_IMPL_TARGETS = [
 ]
 
 
-def _call_with_dummies(fn, *args):
-    sig = inspect.signature(fn)
-    n_required = len(args) if args else sum(
-        1 for p in sig.parameters.values()
-        if p.default is inspect.Parameter.empty
-        and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD))
-    try:
-        fn(*([None] * n_required if not args else list(args)))
-    except NotImplementedError:
-        return
-    except Exception as exc:
-        raise AssertionError(f"接口抛出了非 NotImplementedError 异常: {exc!r}")
-    raise AssertionError("接口在实现阶段到来前不应有实现逻辑")
+class TestProtocolLayerImplemented:
+    """P4 锚点：协议层接口已从骨架进入实现（可调用、非 NotImplementedError）。
 
+    各方法的行为正确性由专门测试文件覆盖；本类只锚定"实现已落地"。"""
 
-class TestProtocolSkeletonNotImplemented:
-    @pytest.mark.parametrize("label,factory,methods", NOT_IMPL_TARGETS,
-                             ids=[t[0] for t in NOT_IMPL_TARGETS])
-    def test_methods_raise_not_implemented(self, label, factory, methods):
-        try:
-            obj = factory()
-        except NotImplementedError:
-            return  # 构造即未实现（CKKSContext）
+    @pytest.mark.parametrize("label,factory,methods", IMPLEMENTED_TARGETS,
+                             ids=[t[0] for t in IMPLEMENTED_TARGETS])
+    def test_methods_no_longer_not_implemented(self, label, factory, methods):
+        import inspect as _inspect
+        obj = factory()
         for name in methods:
-            _call_with_dummies(getattr(obj, name))
+            src = _inspect.getsource(getattr(obj, name))
+            assert "NotImplementedError" not in src, f"{label}.{name} 仍是骨架"
 
-    def test_serialize_envelope_not_implemented(self):
-        _call_with_dummies(M.serialize_envelope, M.MessageEnvelope())
+    def test_serialize_envelope_implemented(self):
+        import dataclasses as _dc
+        env = M.MessageEnvelope(payload_type="ErrorPayload",
+                                payload={"error_code": 1})
+        env.header.payload_len = len(M.payload_to_json(env.payload))
+        env.auth_value = b"\x00" * 16
+        data = M.serialize_envelope(env)
+        env2 = M.deserialize_envelope(data)
+        assert env2.payload == {"error_code": 1}
 
 
 # ---- CKKS 参数表锚定（docs/01 §5.3 表 7，P2 实测修订值）----

@@ -66,17 +66,23 @@ class TestSmoke:
         assert r["wall_s"] > 0
 
     def test_conversions_accounted(self, pipe):
-        """记账断言（防回归）：每层 6 转换（QKV 3 + proj 1 + FFN1 1 + FFN2 1）
-        + 出口重加密 4（attn/h/gelu/层间）×1 层 + 初始加密不入账。"""
+        """记账断言（防回归）：每层 6 转换入口（QKV 3 + proj 1 + FFN1 1 + FFN2 1）
+        + 出口重加密 3/层（attn/h/gelu）+ 层间 (n−1) + 最终输出出口 1
+        （P4：D5 白名单②执行点——LN2 出口 → fresh ct → P0 最终解密）。"""
         before = pipe.stats.conversions
+        before_events = len(pipe._decrypt_events)
         r = pipe.classify("测试文本一条")
         per_call = pipe.stats.conversions - before
-        # 公式：converts 6/层（QKV3+proj1+FFN1+FFN2）+ recrypt 3/层（attn/h/gelu）+ 层间 1×(n−1)
-        expected = 9 * pipe.cfg.n_layer + (pipe.cfg.n_layer - 1)
+        expected = 10 * pipe.cfg.n_layer
         assert per_call == expected, f"单次 classify 转换数 {per_call} ≠ {expected}"
         assert r["conversions"] == pipe.stats.conversions
         assert r["mpc_gates"] == pipe.env.gates_used and r["mpc_gates"] > 0
         assert r["mpc_comm_bytes"] > 0
+        # P4：白名单解密事件已产生（①掩码转换 6/层 + ②最终输出 1 次）——增量口径
+        new_events = pipe._decrypt_events[before_events:]
+        ok_events = [e for e in new_events if e["event"] == "DECRYPT_OK"]
+        assert len(ok_events) == 6 * pipe.cfg.n_layer + 1
+        assert sum(1 for e in ok_events if e.get("kind") == "final_output") == 1
 
 
 class TestNumerics:

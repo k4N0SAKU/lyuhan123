@@ -250,13 +250,16 @@ class MpcResultSharePayload:
 
 @dataclass
 class RecryptSharesPayload:
-    """分享→密文（再随机化出口）：P1 发送 Enc_pk(a1+s) 与 Enc_pk(s)，s 为 P1
-    fresh 采样；P2 在密文域相减得 Enc(a1)，加自身分享 a2 得 ct(结果)。
-    P2 从不获得 s 的明文，P1 从不获得 a2。"""
+    """分享→密文（再随机化出口）：P1 发送 Enc_pk(s) 与 OTP 掩码分享 z=a₁+s，
+    s 为 P1 fresh 采样；P2 计算 w=(z+a₂) mod 2⁶⁴=v+s 后在密文域
+    Enc(w)−Enc(s)=Enc(v) 合成 fresh 顶层密文。P2 从不获得 s 明文，
+    P1 从不获得 a₂。（P4 修订：出口实现为 CrypTFlow 式偏置掩码——P1 只发
+    Enc(s) 与整数 z，密文域合成在 P2 完成；原 Enc(a₁+s) 形态在 2⁶⁴ 份额域
+    存在 float64 53 位尾数精度墙与 mod 回绕双重问题，见 docs/01 §7.4 修订。）"""
 
     request_id: bytes = b"\x00" * 16
-    enc_masked_share: bytes = b""            # Enc_pk(a1 + s)，fresh 顶层密文
-    enc_mask: bytes = b""                    # Enc_pk(s)
+    enc_mask: bytes = b""                    # Enc_pk(s)，fresh 顶层密文
+    masked_share_ints: bytes = b""           # z = (a₁+s) mod 2⁶⁴（8B 大端/槽）
     level_target: int = 0
 
 
@@ -284,10 +287,112 @@ PAYLOAD_REGISTRY = {
 }
 
 
+class SerializationError(ValueError):
+    """信封序列化/反序列化结构错误。"""
+
+
+_HEX_TAG = "__hex__"
+
+
+def _encode_json_value(v):
+    if isinstance(v, bytes):
+        return {_HEX_TAG: v.hex()}
+    if isinstance(v, (list, tuple)):
+        return [_encode_json_value(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _encode_json_value(x) for k, x in v.items()}
+    return v
+
+
+def _decode_json_value(v):
+    if isinstance(v, dict):
+        if len(v) == 1 and _HEX_TAG in v:
+            return bytes.fromhex(v[_HEX_TAG])
+        return {k: _decode_json_value(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_decode_json_value(x) for x in v]
+    return v
+
+
+def payload_to_json(payload: dict) -> bytes:
+    """载荷字典 → 规范 JSON 字节（sort_keys + 紧凑分隔符；bytes 用 hex 标记包）。"""
+    import json
+    return json.dumps(_encode_json_value(payload), sort_keys=True,
+                      separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def payload_from_json(raw: bytes) -> dict:
+    import json
+    return _decode_json_value(json.loads(raw.decode("utf-8")))
+
+
+def envelope_header_bytes(envelope: MessageEnvelope) -> bytes:
+    """公共头定宽编码（39B：version u8 ‖ msg_type u16 ‖ session_id 16B ‖
+    seq u64 ‖ timestamp_ms u64 ‖ payload_len u32，全部大端）。"""
+    h = envelope.header
+    if len(h.session_id) != SESSION_ID_LEN:
+        raise SerializationError("session_id 必须 16B")
+    return (h.version.to_bytes(1, "big")
+            + int(h.msg_type).to_bytes(2, "big")
+            + h.session_id
+            + int(h.seq).to_bytes(8, "big")
+            + int(h.timestamp_ms).to_bytes(8, "big")
+            + int(h.payload_len).to_bytes(4, "big"))
+
+
+def canonical_bytes(envelope: MessageEnvelope) -> bytes:
+    """签名/哈希覆盖段（docs/01 §3.3）：header ‖ ptype_len u16 ‖ ptype ‖ payload_json。
+
+    auth_value 不在覆盖段内（GCM tag/签名本身不可自证）。"""
+    body = (len(envelope.payload_type).to_bytes(2, "big")
+            + envelope.payload_type.encode("utf-8")
+            + payload_to_json(envelope.payload))
+    return envelope_header_bytes(envelope) + body
+
+
 def serialize_envelope(envelope: MessageEnvelope) -> bytes:
-    """规范化序列化（字段序固定，供签名/哈希；docs/01 §3.3）。"""
-    raise NotImplementedError("P4 实现（对应 S7：序列化与签名绑定）")
+    """线格式：canonical_bytes ‖ auth_kind u8 ‖ auth_value_len u32 ‖ auth_value。"""
+    if envelope.auth_kind not in (k.value for k in AuthKind):
+        raise SerializationError(f"未知 auth_kind {envelope.auth_kind}")
+    return (canonical_bytes(envelope)
+            + int(envelope.auth_kind).to_bytes(1, "big")
+            + len(envelope.auth_value).to_bytes(4, "big")
+            + envelope.auth_value)
 
 
 def deserialize_envelope(data: bytes) -> MessageEnvelope:
-    raise NotImplementedError("P4 实现")
+    """线格式逆变换；结构不合法抛 SerializationError（通道层转 INTERNAL）。"""
+    if len(data) < 39 + 2 + 5:
+        raise SerializationError("信封过短")
+    header = CommonHeader(
+        version=data[0],
+        msg_type=int.from_bytes(data[1:3], "big"),
+        session_id=data[3:19],
+        seq=int.from_bytes(data[19:27], "big"),
+        timestamp_ms=int.from_bytes(data[27:35], "big"),
+        payload_len=int.from_bytes(data[35:39], "big"),
+    )
+    pos = 39
+    ptype_len = int.from_bytes(data[pos:pos + 2], "big")
+    pos += 2
+    if pos + ptype_len > len(data):
+        raise SerializationError("payload_type 越界")
+    payload_type = data[pos:pos + ptype_len].decode("utf-8")
+    pos += ptype_len
+    payload_end = pos + header.payload_len
+    if payload_end > len(data):
+        raise SerializationError("payload_len 越界")
+    payload = payload_from_json(data[pos:payload_end])
+    pos = payload_end
+    if pos + 5 > len(data):
+        raise SerializationError("auth 段缺失")
+    auth_kind = data[pos]
+    pos += 1
+    av_len = int.from_bytes(data[pos:pos + 4], "big")
+    pos += 4
+    if pos + av_len != len(data):
+        raise SerializationError("auth_value 长度不一致")
+    auth_value = data[pos:pos + av_len]
+    return MessageEnvelope(header=header, payload_type=payload_type,
+                           payload=payload, auth_kind=auth_kind,
+                           auth_value=auth_value)

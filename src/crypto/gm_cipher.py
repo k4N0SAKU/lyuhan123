@@ -192,18 +192,50 @@ def gf128_mult(x: bytes, y: bytes) -> bytes:
 
 
 def _ghash(h: bytes, aad: bytes, ciphertext: bytes) -> bytes:
-    """GHASH：pad(A)‖pad(C)‖[len(A)]‖[len(C)] 逐 16B 块 Y←(Y⊕B)·H。"""
+    """GHASH：pad(A)‖pad(C)‖[len(A)]‖[len(C)] 逐 16B 块 Y←(Y⊕B)·H。
+
+    P4 性能注：块乘按字节位置线性分解（X·H = Σ_k x_k·x^(120−8k)·H）——
+    16 张 256 项表 T_k[v] = v·x^(120−8k)·H，每块 16 次查表异或、无进位耦合
+    （GF(2^128) 线性性），与逐位参考实现 gf128_mult 数学等价，RFC 8998 向量
+    与单零块断言锚定；大块数据（1.6MB 级转换密文）快 ~8×。表按 H 缓存
+    （H=E(K,0) 每密钥恒定，lru_cache）。"""
     def pad16(b: bytes) -> bytes:
         return b + b"\x00" * ((-len(b)) % 16)
 
     data = (pad16(aad) + pad16(ciphertext)
             + (len(aad) * 8).to_bytes(8, "big")
             + (len(ciphertext) * 8).to_bytes(8, "big"))
+    tables = _ghash_tables(h)
     y = 0
     for i in range(0, len(data), 16):
         y ^= int.from_bytes(data[i:i + 16], "big")
-        y = int.from_bytes(gf128_mult(y.to_bytes(16, "big"), h), "big")
+        z = 0
+        for k in range(16):
+            z ^= tables[k][(y >> (120 - 8 * k)) & 0xFF]
+        y = z
     return y.to_bytes(16, "big")
+
+
+from functools import lru_cache
+
+
+@lru_cache(maxsize=8)
+def _ghash_tables(h: bytes) -> tuple:
+    """T_k[v] = v·x^(120−8k)·H 预计算表（T_0 经参考实现生成，其后逐表
+    右移约简 8 位：v·x^(120−8(k+1))·H = (v·x^(120−8k)·H)·x⁻⁸）。"""
+    t0 = [int.from_bytes(gf128_mult(bytes([v]) + b"\x00" * 15, h), "big")
+          for v in range(256)]
+    tables = [t0]
+    for _ in range(15):
+        prev = tables[-1]
+        nxt = []
+        for val in prev:
+            w = val
+            for _ in range(8):
+                w = (w >> 1) ^ (_SM4_POLY_R if w & 1 else 0)
+            nxt.append(w)
+        tables.append(nxt)
+    return tuple(tuple(t) for t in tables)
 
 
 def _gctr(key: bytes, icb: bytes, data: bytes) -> bytes:

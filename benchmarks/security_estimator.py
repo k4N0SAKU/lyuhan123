@@ -34,6 +34,10 @@ def _load_estimator():
             sys.path.insert(0, c)
             break
     from estimator import LWE  # noqa
+    from estimator.nd import Ternary, DiscreteGaussian  # noqa（P4 实测 API：
+    # 分布类在 estimator.nd 模块级，非 LWE.Ternary——P3 盲写口径已修正）
+    LWE.Ternary = Ternary
+    LWE.DiscreteGaussian = DiscreteGaussian
     return LWE
 
 
@@ -57,14 +61,15 @@ def main() -> int:
         "D_modea_2p17_3480bit": dict(n=1 << 17, bits=3480),
     }
     if args.quick:
-        cases = {k: v for k, v in cases.items() if k.startswith("C")}
+        cases = {k: v for k, v in cases.items()
+                 if k.startswith("C") or k.startswith("A")}   # 决策组：A+C
 
     results = {}
     for name, c in cases.items():
         q = 2 ** c["bits"]
         params = LWE.Parameters(
             n=c["n"], q=q,
-            Xs=LWE.Ternary(),                      # 保守：均匀三元组
+            Xs=LWE.Ternary,                        # 保守：均匀三元组（nd.Ternary 为单例）
             Xe=LWE.DiscreteGaussian(3.2),
             tag=name,
         )

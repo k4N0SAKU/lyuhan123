@@ -51,6 +51,14 @@ PARAMS_DEEP19 = CKKSParams(
     coeff_mod_bit_sizes=(60,) + (40,) * 19 + (60,), scale_log2=40, slots=1 << 14,
     note="深度 19（本栈上限）；用于多层链精度回归，非推理配置")
 
+# P4 协议层玩具参数（仅协议/转换测试与演示：密钥生成快、密文 ~KB 级。
+# TC128 校验对 CKKS 强制 HomomorphicEncryption.org 合规——N=1024/2048 全链
+# 被拒（实测），N=4096 起 100bit 可用。非推理配置，不进入性能口径。）
+PARAMS_P4_TOY = CKKSParams(
+    name="p4-protocol-toy", poly_modulus_degree=1 << 12,
+    coeff_mod_bit_sizes=(30, 30, 40), scale_log2=30, slots=1 << 11,
+    note="P4 协议测试/通道 e2e 玩具参数；转换协议全流程等价可验")
+
 # 模式 A 理论参数：**本栈不可实例化**（SEAL 校验表上限 2^15，需 84 层深链）。
 # 保留常量供理论推演引用；实例化会抛 ValueError（test 断言该行为）。
 PARAMS_MODE_A = CKKSParams(
@@ -164,6 +172,21 @@ class CKKSContext:
         self._encryptor.encrypt(self._encode(values, scale_exp), ct)
         return CKKSCiphertext(ct, level=0,
                               scale_exp=scale_exp or self.params.scale_log2)
+
+    def encrypt_vector_at_scale(self, values: List[float],
+                                scale: float) -> "CKKSCiphertext":
+        """以**任意精确 float scale** 加密（P4 转换协议用：rescale 素数非
+        精确 2^k，深层密文 scale 有 ~1e-6 相对漂移——掩码密文必须按目标
+        密文的精确 scale 编码，否则 _align_scale 的 relabeling 在 OTP 大值
+        域引入绝对误差数千（P4 实测，见 conversion.py）。"""
+        vals = list(values) + [0.0] * (self.slot_count - len(values))
+        if len(vals) > self.slot_count:
+            raise ValueError(f"槽溢出: {len(values)} > {self.slot_count}")
+        pt = sealapi.Plaintext()
+        self._encoder.encode(vals, scale, pt)
+        ct = sealapi.Ciphertext()
+        self._encryptor.encrypt(pt, ct)
+        return CKKSCiphertext(ct, level=0, scale_exp=None)
 
     def decrypt(self, ct: "CKKSCiphertext") -> List[float]:
         if self.public_only or self._decryptor is None:
@@ -296,6 +319,33 @@ class CKKSContext:
     def load_ct(self, path: str, level: int = 0) -> "CKKSCiphertext":
         raw = sealapi.Ciphertext()
         raw.load(self._ctx, path)
+        return CKKSCiphertext(raw, level=level)
+
+    def serialize_ct_bytes(self, ct: "CKKSCiphertext") -> bytes:
+        """密文 → 字节（通道传输用；P4 转换协议 CONVERT_MASKED_CT/
+        RECRYPT_SHARES 载荷）。经临时文件中转（pybind 无内存 save 接口，
+        与 mod_switch_to 同一约束）。"""
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".seal")
+        os.close(fd)
+        try:
+            ct.raw.save(path)
+            with open(path, "rb") as f:
+                return f.read()
+        finally:
+            os.unlink(path)
+
+    def load_ct_bytes(self, data: bytes, level: int = 0) -> "CKKSCiphertext":
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix=".seal")
+        os.close(fd)
+        try:
+            with open(path, "wb") as f:
+                f.write(data)
+            raw = sealapi.Ciphertext()
+            raw.load(self._ctx, path)
+        finally:
+            os.unlink(path)
         return CKKSCiphertext(raw, level=level)
 
 
