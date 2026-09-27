@@ -34,10 +34,10 @@ def _load_estimator():
             sys.path.insert(0, c)
             break
     from estimator import LWE  # noqa
-    from estimator.nd import Ternary, DiscreteGaussian  # noqa（P4 实测 API：
-    # 分布类在 estimator.nd 模块级，非 LWE.Ternary——P3 盲写口径已修正）
-    LWE.Ternary = Ternary
-    LWE.DiscreteGaussian = DiscreteGaussian
+    from estimator import nd as _nd  # noqa（P4/P5 实测 API：Ternary 为模块级
+    # 单例实例（Uniform(-1,1)，不可调用）；DiscreteGaussian 为类（可调用））
+    LWE.Ternary = _nd.Ternary
+    LWE.DiscreteGaussian = _nd.DiscreteGaussian
     return LWE
 
 
@@ -76,7 +76,11 @@ def main() -> int:
         t0 = time.perf_counter()
         try:
             rep = LWE.estimate(params, deny_list=["arora-gb", "bkw"])
-            best = min(v.get("rop", 2**64) for v in rep.values() if isinstance(v, dict))
+            costs = [float(v["rop"]) for v in rep.values()
+                     if isinstance(v, dict) and v.get("rop")]
+            if not costs:
+                raise ValueError(f"estimate 返回空（attacks={list(rep) if isinstance(rep, dict) else rep}）")
+            best = min(costs)
             bits_sec = float(best).bit_length()
             results[name] = {"n": c["n"], "chain_bits": c["bits"],
                              "security_bits": bits_sec,

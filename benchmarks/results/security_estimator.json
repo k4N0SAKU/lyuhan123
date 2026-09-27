@@ -1,0 +1,12 @@
+{
+  "A_modeb_2p15_200bit": {
+    "n": 32768,
+    "chain_bits": 200,
+    "error": "ValueError('min() iterable argument is empty')"
+  },
+  "C_decision_2p16_1720bit": {
+    "n": 65536,
+    "chain_bits": 1720,
+    "error": "ValueError('min() iterable argument is empty')"
+  }
+}

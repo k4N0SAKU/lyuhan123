@@ -37,7 +37,7 @@ from src.crypto.gm_cipher import (CTX_AUTH, CTX_KEY, _ECC, _SM2_N, _kg_bytes,
                                   sm3_hash, sm3_kdf, sm4_gcm_decrypt,
                                   sm4_gcm_encrypt, AuthenticationError)
 from src.protocol import messages as M
-from src.protocol.auth import Authenticator, NodeIdentity
+from src.protocol.auth import AuthError, Authenticator, NodeIdentity
 from src.protocol.keylifecycle import (ROTATE_INTERVAL_ROUNDS, KeyManager,
                                        KeyLifecycleError)
 
@@ -354,10 +354,21 @@ class SecureChannel:
 
     def _accept_cert(self, env: M.MessageEnvelope) -> None:
         if env.payload_type != "CertExchangePayload":
+            self._event("SECURITY_ALERT", {"code": int(M.ErrorCode.CERT_INVALID),
+                                           "why": "握手期未出示证书"})
             raise ChannelError(2, "握手顺序错误：期待证书交换")
         cert = M.CertExchangePayload(
             **{k: M._decode_json_value(v) for k, v in env.payload.items()})
-        self.auth.verify_cert(cert, self._clock_ms())
+        try:
+            self.auth.verify_cert(cert, self._clock_ms())
+        except AuthError as exc:
+            # F7-2：伪造/过期证书的接入尝试必须留审计告警
+            self._event("SECURITY_ALERT", {
+                "code": int(M.ErrorCode.CERT_INVALID
+                            if exc.error_code == 2 else M.ErrorCode.CERT_EXPIRED),
+                "why": f"握手证书验证失败: {exc.detail}",
+                "claimed_subject": cert.subject_id})
+            raise
         self.peer = NodeIdentity(node_id=cert.subject_id,
                                  static_pub=cert.subject_pub, cert=cert)
 
