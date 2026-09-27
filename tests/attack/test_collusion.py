@@ -11,6 +11,8 @@
 - **钩子证明**：collect_view 收集三方全部内存视图与线缆字节，扫描输入串/
   token id/定点编码——「输入仅在 P0 内存」。
 
+夹具为 module 级（pytest 8 对类内 class-scoped fixture 弃用告警——P5-R1）。
+
 运行：pytest tests/attack/test_collusion.py -v        （模式 A 快；模式 B slow）
 """
 from __future__ import annotations
@@ -20,12 +22,11 @@ import os
 import numpy as np
 import pytest
 
-from src.crypto.ckks_ops import CKKSContext, PARAMS_MODE_B, PARAMS_P4_TOY
+from src.crypto.ckks_ops import CKKSContext, PARAMS_P4_TOY
 from src.crypto.secret_sharing import DEFAULT_MODULUS
 from src.protocol.conversion import (ClientRole, InferRole, KeyRole,
-                                     entry_p2_share, from_fixed, to_fixed)
-from tests.attack.framework import (VERDICTS, collect_view, pearson,
-                                    view_contains_token)
+                                     from_fixed, to_fixed)
+from tests.attack.framework import VERDICTS, collect_view, pearson
 
 INPUT_TEXT = "办事大厅服务热情周到，一次办好"
 
@@ -44,30 +45,35 @@ def _fixed_stream(vec, repeat_to: int) -> bytes:
 # 模式 A（全密文数据流）：t=2 合谋仅有密文+公钥 —— 防御成功
 # =====================================================================
 
-class TestCollusionModeA:
-    @pytest.fixture(scope="class")
-    def modea(self):
-        full = CKKSContext(PARAMS_P4_TOY)
-        import tempfile
-        d = tempfile.mkdtemp(prefix="f8a_")
-        full.save_keys(d, with_secret=True)
-        sec = CKKSContext(PARAMS_P4_TOY, public_only=False, keys_dir=d)
-        pub = CKKSContext(PARAMS_P4_TOY, public_only=True, keys_dir=d)
-        del full
-        x = [0.5, -1.25, 2.0, 3.75, -0.125, 1.0] + [0.0] * 10
-        ct_input = sec.encrypt_vector(x)
-        # 模式 A 数据面：P2 的中间/输出密文（本栈不可实例化深链——
-        # 安全性结论只依赖 CKKS IND-CPA 与密钥分布，与链深无关，如实声明）
-        ct_mid = pub.encrypt_vector([v * 0.5 for v in x])
-        ct_out = pub.encrypt_vector([v * 0.1 for v in x])
-        coalition = {                       # P1+P2 全部内存视图（t=2）
-            "pk_ctx": pub, "input_ct": ct_input, "mid_ct": ct_mid,
-            "out_ct": ct_out,
-            "model_weights": np.random.default_rng(7).normal(size=(16, 16)),
-            "wire": b"",                    # 模式 A 线缆=密文帧（同构）
-        }
-        return {"sec": sec, "pub": pub, "x": x, "coalition": coalition}
+def _build_modea():
+    full = CKKSContext(PARAMS_P4_TOY)
+    import tempfile
+    d = tempfile.mkdtemp(prefix="f8a_")
+    full.save_keys(d, with_secret=True)
+    sec = CKKSContext(PARAMS_P4_TOY, public_only=False, keys_dir=d)
+    pub = CKKSContext(PARAMS_P4_TOY, public_only=True, keys_dir=d)
+    del full
+    x = [0.5, -1.25, 2.0, 3.75, -0.125, 1.0] + [0.0] * 10
+    ct_input = sec.encrypt_vector(x)
+    # 模式 A 数据面：P2 的中间/输出密文（本栈不可实例化深链——
+    # 安全性结论只依赖 CKKS IND-CPA 与密钥分布，与链深无关，如实声明）
+    ct_mid = pub.encrypt_vector([v * 0.5 for v in x])
+    ct_out = pub.encrypt_vector([v * 0.1 for v in x])
+    coalition = {                       # P1+P2 全部内存视图（t=2）
+        "pk_ctx": pub, "input_ct": ct_input, "mid_ct": ct_mid,
+        "out_ct": ct_out,
+        "model_weights": np.random.default_rng(7).normal(size=(16, 16)),
+        "wire": b"",                    # 模式 A 线缆=密文帧（同构）
+    }
+    return {"sec": sec, "pub": pub, "x": x, "coalition": coalition}
 
+
+@pytest.fixture(scope="module")
+def modea():
+    return _build_modea()
+
+
+class TestCollusionModeA:
     def test_no_secret_key_in_coalition(self, modea):
         """钩子①：合谋视图内不存在任何 CKKS 私钥材料（结构性 public_only）。"""
         assert modea["coalition"]["pk_ctx"].public_only is True
@@ -106,10 +112,11 @@ class TestCollusionModeA:
         enc_sizes = {k: pub.encrypt_vector(v).size_bytes for k, v in
                      cands.items()}
         for k, sz in enc_sizes.items():
-            assert lo - 200 <= sz <= hi + 200,                 f"候选 {k} 密文尺寸 {sz} 超出基线带宽 [{lo},{hi}]（长度泄露）"
+            assert lo - 200 <= sz <= hi + 200, \
+                f"候选 {k} 密文尺寸 {sz} 超出基线带宽 [{lo},{hi}]（长度泄露）"
+        # 重加密不可与持有密文匹配：逐 64 字节采样重合率 ≈1/256（随机化加密）
         for k, v in cands.items():
             re_ct = pub.encrypt_vector(v)
-            # 重加密与持有密文的逐字节重合率（随机化加密 ⇒ ≈1/256）
             a, b = pub.serialize_ct_bytes(re_ct), pub.serialize_ct_bytes(
                 modea["coalition"]["out_ct"])
             match = sum(1 for i in range(0, min(len(a), len(b)), 64)
@@ -133,51 +140,55 @@ class TestCollusionModeA:
 # 模式 B（混合管线）：t=1 防御成功；t=2 边界演示（docs/02 §3.3）
 # =====================================================================
 
-@pytest.mark.slow
+def _build_modeb():
+    """真实 BERT 嵌入/权重 + 玩具 CKKS 的一次真实协议转换（module 级）。"""
+    from src.model.loader import BertSentimentPipeline
+    plain = BertSentimentPipeline()
+    full = CKKSContext(PARAMS_P4_TOY)
+    import tempfile
+    d = tempfile.mkdtemp(prefix="f8b_")
+    full.save_keys(d, with_secret=True)
+    sec = CKKSContext(PARAMS_P4_TOY, public_only=False, keys_dir=d)
+    pub = CKKSContext(PARAMS_P4_TOY, public_only=True, keys_dir=d)
+    del full
+
+    tok = plain.tokenizer
+    enc = tok(INPUT_TEXT, truncation=True, max_length=2, return_tensors="pt")
+    ids = enc["input_ids"][0].tolist()
+    L = len(ids)
+    with __import__("torch").inference_mode():
+        x = plain.model.bert.embeddings(enc["input_ids"])[0].numpy()  # (L,768)
+    layer = plain.model.bert.encoder.layer[0]
+    W_q = layer.attention.self.query.weight.detach().numpy().astype(np.float64)
+    b_q = layer.attention.self.query.bias.detach().numpy().astype(np.float64)
+    q_out = x @ W_q.T + b_q                    # P2 密文域线性层的明文语义
+
+    # 真实协议转换（角色直连，toy 参数）：P2 掩码 → P0 白名单①解密 → 分享
+    client = ClientRole(sec)
+    keynode = KeyRole(pub)
+    infer = InferRole(pub)
+    rid = os.urandom(16)
+    # 玩具参数槽 1024 < L·768=1536 ⇒ 协议真实承载 token0 的 768 维 QKV
+    # 输出（F8 的重构攻击语义不变；多 token 仅扩大同一失效面）
+    q_flat = q_out[0].tolist()
+    ct_q = pub.encrypt_vector(q_flat)
+    masked = infer.entry(ct_q, rid)
+    y1 = client.masked_decrypt(masked, rid)    # P1 视图
+    p2_share = infer.entry_p2_share(rid)       # P2 视图（−r）
+    keynode.take_entry_share(rid, y1)
+
+    return {"tok": tok, "plain": plain, "ids": ids, "x": x, "L": L,
+            "W_q": W_q, "b_q": b_q, "q_out": q_out[0],
+            "client": client, "keynode": keynode, "infer": infer,
+            "y1": y1, "p2_share": p2_share, "rid": rid}
+
+
+@pytest.fixture(scope="module")
+def modeb():
+    return _build_modeb()
+
+
 class TestCollusionModeB:
-    @pytest.fixture(scope="class")
-    def modeb(self):
-        """真实 BERT 嵌入/权重 + 玩具 CKKS 的一次真实协议转换。"""
-        from src.model.loader import BertSentimentPipeline
-        plain = BertSentimentPipeline()
-        full = CKKSContext(PARAMS_P4_TOY)
-        import tempfile
-        d = tempfile.mkdtemp(prefix="f8b_")
-        full.save_keys(d, with_secret=True)
-        sec = CKKSContext(PARAMS_P4_TOY, public_only=False, keys_dir=d)
-        pub = CKKSContext(PARAMS_P4_TOY, public_only=True, keys_dir=d)
-        del full
-
-        tok = plain.tokenizer
-        enc = tok(INPUT_TEXT, truncation=True, max_length=2, return_tensors="pt")
-        ids = enc["input_ids"][0].tolist()
-        L = len(ids)
-        with __import__("torch").inference_mode():
-            x = plain.model.bert.embeddings(enc["input_ids"])[0].numpy()  # (L,768)
-        layer = plain.model.bert.encoder.layer[0]
-        W_q = layer.attention.self.query.weight.detach().numpy().astype(np.float64)
-        b_q = layer.attention.self.query.bias.detach().numpy().astype(np.float64)
-        q_out = x @ W_q.T + b_q                    # P2 密文域线性层的明文语义
-
-        # 真实协议转换（角色直连，toy 参数）：P2 掩码 → P0 白名单①解密 → 分享
-        client = ClientRole(sec)
-        keynode = KeyRole(pub)
-        infer = InferRole(pub)
-        rid = os.urandom(16)
-        # 玩具参数槽 1024 < L·768=1536 ⇒ 协议真实承载 token0 的 768 维 QKV
-        # 输出（F8 的重构攻击语义不变；多 token 仅扩大同一失效面）
-        q_flat = q_out[0].tolist()
-        ct_q = pub.encrypt_vector(q_flat)
-        masked = infer.entry(ct_q, rid)
-        y1 = client.masked_decrypt(masked, rid)    # P1 视图
-        p2_share = infer.entry_p2_share(rid)       # P2 视图（−r）
-        keynode.take_entry_share(rid, y1)
-
-        return {"tok": tok, "plain": plain, "ids": ids, "x": x, "L": L,
-                "W_q": W_q, "b_q": b_q, "q_out": q_out[0],
-                "client": client, "keynode": keynode, "infer": infer,
-                "y1": y1, "p2_share": p2_share, "rid": rid}
-
     # ---- 钩子证明 ----
     def test_input_only_in_p0_memory(self, modeb):
         """钩子证明：输入串与 token id 定宽字节模式不在 P1/P2 视图的任何
@@ -189,11 +200,14 @@ class TestCollusionModeB:
         }
         text_hex = INPUT_TEXT.encode("utf-8").hex()
         for name, v in views.items():
-            assert not any(text_hex in b for b in v["bytes_items"]),                 f"{name} 出现输入明文（hex 视图）"
-            assert not any(INPUT_TEXT in s for s in v["str_items"]),                 f"{name} 出现输入明文"
+            assert not any(text_hex in b for b in v["bytes_items"]), \
+                f"{name} 出现输入明文（hex 视图）"
+            assert not any(INPUT_TEXT in s for s in v["str_items"]), \
+                f"{name} 出现输入明文"
             for t in ids:
                 pat = t.to_bytes(8, "big").hex()
-                assert not any(pat in b for b in v["bytes_items"]),                     f"{name} 视图出现 token id {t} 原值（应为 OTP 掩码域）"
+                assert not any(pat in b for b in v["bytes_items"]), \
+                    f"{name} 视图出现 token id {t} 原值（应为 OTP 掩码域）"
         # 对照：P0 白名单门确为持钥方（协议语义需要其视图含 y₁ 掩码值）
         assert modeb["client"].whitelist._ctx.public_only is False
         VERDICTS.collect("F8-模式B", "钩子：输入仅在 P0 内存", "防御成功",
@@ -224,7 +238,8 @@ class TestCollusionModeB:
                      for a, v in zip(y1[:8], q_decoy[:8])]
         true_in = sum(1 for r in true_res if r < win) / len(true_res)
         decoy_in = sum(1 for r in decoy_res if r < win) / len(decoy_res)
-        assert abs(true_in - decoy_in) < 0.01,             f"残差落窗率可区分 true={true_in} decoy={decoy_in}"
+        assert abs(true_in - decoy_in) < 0.01, \
+            f"残差落窗率可区分 true={true_in} decoy={decoy_in}"
         VERDICTS.collect("F8-模式B", "P1 单独（t=1）", "防御成功",
                          {"corr_with_true_plaintext": round(corr, 4),
                           "residual_window_test": "true/decoy 落窗率差 <0.01",
@@ -263,7 +278,6 @@ class TestCollusionModeB:
         m = modeb["plain"].model
         emb = m.bert.embeddings
         with torch.inference_mode():
-            V = int(emb.word_embeddings.weight.shape[0])
             word = emb.word_embeddings.weight.double().numpy()      # (V,768)
             pos = emb.position_embeddings.weight.double().numpy()
             tt = emb.token_type_embeddings.weight.double().numpy()[0]

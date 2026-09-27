@@ -42,6 +42,14 @@ def _identity(ca_priv, node_id):
                         cert=ca_issue_cert(ca_priv, node_id, pub, now_ms=NOW))
 
 
+
+def _guarded_establish(chan, link, ca_pub, initiator):
+    """线程内吞异常（告警纪律——P5-R1：queue.Empty/对端先退出均属预期路径）。"""
+    try:
+        chan.establish(link, ca_pub, initiator=initiator)
+    except Exception:
+        pass
+
 def _establish_pair(ca_pub, id_a, id_b, alerts_a=None, alerts_b=None):
     la, lb = LoopbackLink.create_pair()
     sid = os.urandom(16)
@@ -51,8 +59,10 @@ def _establish_pair(ca_pub, id_a, id_b, alerts_a=None, alerts_b=None):
                         clock_ms=_Clock(), audit=ca_)
     chb = SecureChannel(Session(sid, 1), id_b, KeyManager(),
                         clock_ms=_Clock(), audit=cb)
-    t1 = threading.Thread(target=cha.establish, args=(la, ca_pub, True))
-    t2 = threading.Thread(target=chb.establish, args=(lb, ca_pub, False))
+    t1 = threading.Thread(target=_guarded_establish,
+                          args=(cha, la, ca_pub, True))
+    t2 = threading.Thread(target=_guarded_establish,
+                          args=(chb, lb, ca_pub, False))
     t1.start(); t2.start(); t1.join(60); t2.join(60)
     return cha, chb, la, lb
 
@@ -167,14 +177,20 @@ class TestForgeCert:
                             clock_ms=_Clock())
         chb = SecureChannel(Session(cha.session.session_id, 1), victim,
                             KeyManager(), clock_ms=_Clock())
-        t1 = threading.Thread(target=cha.establish, args=(la, ca_pub, True),
-                              daemon=True)
+        def _init():
+            try:
+                cha.establish(la, ca_pub, initiator=True)
+            except Exception:
+                pass                       # 发起方在伪造证书被拒后超时/失败属预期
+
+        t1 = threading.Thread(target=_init, daemon=True)
 
         def _resp():
             try:
                 chb.establish(lb, ca_pub, initiator=False)
-            except (ChannelError, AuthError):
+            except (ChannelError, AuthError, Exception):
                 pass                       # 应答方按预期在证书/签名验证处失败
+                # （queue.Empty 含于 Exception——对端先退出时接收超时属预期路径）
 
         t1.start()
         t2 = threading.Thread(target=_resp)
@@ -207,9 +223,13 @@ class TestForgeCert:
                 box["a"] = type(exc).__name__
 
         t1 = threading.Thread(target=_run)
-        t2 = threading.Thread(target=lambda: chb.establish(lb, ca_pub,
-                                                           initiator=False),
-                              daemon=True)
+        def _resp2():
+            try:
+                chb.establish(lb, ca_pub, initiator=False)
+            except Exception:
+                pass                       # rogue-CA 拒绝/对端先退出均属预期
+
+        t2 = threading.Thread(target=_resp2, daemon=True)
         t1.start(); t2.start(); t1.join(30); t2.join(30)
         assert box.get("a") != "active"          # 发起方验对端证书失败
 

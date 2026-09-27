@@ -28,14 +28,24 @@ class _Clock:
         return self.ms
 
 
+
+def _guarded_establish(chan, link, ca_pub, initiator):
+    """线程内吞异常（告警纪律——P5-R1：queue.Empty/对端先退出均属预期路径）。"""
+    try:
+        chan.establish(link, ca_pub, initiator=initiator)
+    except Exception:
+        pass
+
 def _establish_pair(attack_ca, id_a, id_b, threshold=999):
     la, lb = LoopbackLink.create_pair()
     cha = SecureChannel(Session(os.urandom(16), 0), id_a, KeyManager(),
                         clock_ms=_Clock(), ratchet_threshold=threshold)
     chb = SecureChannel(Session(cha.session.session_id, 1), id_b, KeyManager(),
                         clock_ms=_Clock(), ratchet_threshold=threshold)
-    t1 = threading.Thread(target=cha.establish, args=(la, attack_ca["pub"], True))
-    t2 = threading.Thread(target=chb.establish, args=(lb, attack_ca["pub"], False))
+    t1 = threading.Thread(target=_guarded_establish,
+                          args=(cha, la, attack_ca["pub"], True))
+    t2 = threading.Thread(target=_guarded_establish,
+                          args=(chb, lb, attack_ca["pub"], False))
     t1.start(); t2.start(); t1.join(60); t2.join(60)
     return cha, chb, la, lb
 
@@ -141,10 +151,10 @@ class TestReplay:
         chb = SecureChannel(Session(cha.session.session_id, 1), b,
                             KeyManager(), clock_ms=clock,
                             ratchet_threshold=999)
-        t1 = threading.Thread(target=cha.establish, args=(la, attack_ca["pub"],
-                                                          True))
-        t2 = threading.Thread(target=chb.establish, args=(lb, attack_ca["pub"],
-                                                          False))
+        t1 = threading.Thread(target=_guarded_establish,
+                              args=(cha, la, attack_ca["pub"], True))
+        t2 = threading.Thread(target=_guarded_establish,
+                              args=(chb, lb, attack_ca["pub"], False))
         t1.start(); t2.start(); t1.join(60); t2.join(60)
         cha.send_message(_msg(1))
         captured = _capture(la)

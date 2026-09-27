@@ -1,12 +1,34 @@
 {
+  "schema": "a122-perf/1",
+  "kind": "security-estimator",
+  "workload": "lattice-estimator (malb) @ SageMath 10.x (WSL conda-forge)",
+  "model": "LWE, Xs=Ternary(单例), Xe=DiscreteGaussian(3.2), 秘密/误差按 docs/02 §1.3",
+  "provenance": {
+    "first_run_log": "benchmarks/results/estimator_logs/first_run_20260927.log（estimator 原生输出存档）",
+    "note": "首跑 JSON 后处理 bug（Cost 对象误被 isinstance(dict) 过滤）致 min() 空——数值现从原生日志解析；修复后重跑进行中（unbuffered 流式日志），完成即覆盖本文件"
+  },
   "A_modeb_2p15_200bit": {
     "n": 32768,
     "chain_bits": 200,
-    "error": "ValueError('min() iterable argument is empty')"
+    "attacks_observed_in_log": {
+      "bdd_hybrid": 8666.4,
+      "bdd_mitm_hybrid": 5868.4
+    },
+    "best_rop_log10_2": 5868.4,
+    "completeness": "部分（仅 bdd_hybrid/bdd_mitm_hybrid 出现在存档日志；usvp/bdd/dual 随重跑补全）"
   },
   "C_decision_2p16_1720bit": {
     "n": 65536,
     "chain_bits": 1720,
-    "error": "ValueError('min() iterable argument is empty')"
-  }
+    "attacks_observed_in_log": {
+      "usvp": 130.2,
+      "bdd": 130.2,
+      "dual": 131.0,
+      "dual_hybrid": 131.3
+    },
+    "best_rop_log10_2": 130.2,
+    "completeness": "完整（usvp/bdd/dual/dual_hybrid 四攻击均在存档日志）",
+    "meets_128bit_classical": true
+  },
+  "decision_note": "C（2^16/1720bit）best=2^130.2 ≥ 2^128 classical ⇒ 满足团队切换判据（P3 评审预案：≥128-bit classical 建议切 2^16——转换减半、L=16 单密文，代价=密文 3.3MB+SEC_LEVEL_NONE 显式声明+最小步长 Galois 集 68s 已实测）"
 }
