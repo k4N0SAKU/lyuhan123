@@ -39,7 +39,7 @@
     ],
     "quick": false
   },
-  "timestamp_utc": "2026-09-28T04:41:04Z",
+  "timestamp_utc": "2026-09-28T06:18:36Z",
   "code_size": {
     "crypto": {
       "code": 789,
@@ -125,7 +125,7 @@
   },
   "tables": {
     "tables_written": "benchmarks\\results\\p6_tables.md",
-    "sections": 2
+    "sections": 4
   },
   "plaintext": {
     "bert_latency_full12": {
