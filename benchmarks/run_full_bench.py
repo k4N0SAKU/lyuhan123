@@ -135,8 +135,12 @@ def part_cipher_matrix(layers, cipher_rounds: int) -> dict:
     from src.model.loader import BertSentimentPipeline
     from src.model.pipeline import ModeBPipeline, PipelineConfig
     plain = BertSentimentPipeline()
+    # P6-R1 OOM 修复：_diag_cache 随层数累积（每权重 ~100MB 明文对角线集，
+    # 4+8+12 单进程合计 ~14.4GB 必然 OOM）——每次调用只跑一个层配置，
+    # 由调用方逐层子进程隔离（缓存随进程消亡）+ JSON 合并。
     pipe = ModeBPipeline(plain, PipelineConfig(n_layer=min(layers), seq_tokens=2))
-    out = {}
+    existing = _load_json().get("cipher_matrix", {})
+    out = dict(existing) if isinstance(existing, dict) else {}
     for k in layers:
         pipe.cfg.n_layer = k
         recs = []
@@ -163,15 +167,15 @@ def part_cipher_matrix(layers, cipher_rounds: int) -> dict:
             "label_stability": len({r["label"] for r in recs}) == 1,
             "records": recs,
         }
-    out["modeA"] = {
+    out["modeA"] = out.get("modeA", {
         "status": "N/A（本栈不可实例化）",
         "reason": "SEAL 校验上限 2^15；模式 A 需 2^17/84 层深链（docs/01 §5.3），"
                   "仅理论推演，不做模拟冒充",
-    }
-    out["task_gpt2_cipher"] = {
+    })
+    out["task_gpt2_cipher"] = out.get("task_gpt2_cipher", {
         "status": "未实现（如实申报）",
         "reason": "密文管线当前实现 BERT 情感分类；GPT-2 生成仅有明文/量化基线",
-    }
+    }) if "task_gpt2_cipher" not in out else out["task_gpt2_cipher"]
     return out
 
 
@@ -592,14 +596,19 @@ def part_tables() -> dict:
         lines += ["## 5. C2 参数自适应 A/B（GPT-2；20 prompts × 16 token）", "",
                   "| 配置 | token 一致率 | 体积 (MB) | 时延 P50 (ms) | 方案分布 |",
                   "|---|---|---|---|---|"]
-        for name in ("default_q22", "pure_int8", "adaptive"):
+        rows = ["default_q22", "pure_int8", "adaptive", "ladder_per_layer",
+                "conv_int8_emb_q22", "conv_fp16_emb_q22",
+                "conv_q22_emb_fp16", "conv_q22_emb_int8"]
+        for name in rows:
             c = c2.get(name)
             if not c:
                 continue
+            hist = c["scheme_histogram"]
+            hist_s = (json.dumps(hist, ensure_ascii=False)
+                      if isinstance(hist, dict) else str(hist))
             lines.append(f"| {name} | {c['token_agreement_vs_fp32']:.4f} | "
                          f"{c['size_bytes']/1048576:.1f} | "
-                         f"{c['latency']['p50']:.0f} | "
-                         f"{c['scheme_histogram']} |")
+                         f"{c['latency']['p50']:.0f} | {hist_s} |")
         lines += ["", f"FP32 参考体积："
                       f"{c2.get('fp32_reference_size_bytes', 0)/1048576:.1f} MB",
                   ""]
