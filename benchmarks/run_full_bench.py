@@ -563,7 +563,7 @@ def part_tables() -> dict:
             if not cell:
                 continue
             mb = cell["peak_delta_bytes"]["p50"] / 1048576
-            lines.append(f"| 模式B/{k}层 | {cell['rounds']} | "
+            lines.append(f"| 模式B/{k}层 | {cell['rounds_done']}/{cell['rounds_target']} | "
                          f"{cell['wall_ms']['p50']:.0f} | "
                          f"{cell['wall_ms']['p95']:.0f} | "
                          f"{cell['wall_ms']['mean']:.0f} | {mb:.1f} | "
