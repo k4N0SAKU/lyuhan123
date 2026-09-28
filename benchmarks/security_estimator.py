@@ -76,8 +76,19 @@ def main() -> int:
         t0 = time.perf_counter()
         try:
             rep = LWE.estimate(params, deny_list=["arora-gb", "bkw"])
-            costs = [float(v["rop"]) for v in rep.values()
-                     if isinstance(v, dict) and v.get("rop")]
+            # Cost 是 collections.UserDict 子类——**非** dict 子类，
+            # isinstance(v, dict) 恒 False（P5-R1 二次踩坑实证：两次"已修"
+            # 均栽在同一过滤器上）；以 hasattr("get") 守卫 + v["rop"] 直取。
+            # 不可行攻击的 rop 为 +Infinity（sage oo）——必须过滤，否则
+            # min() 得 inf（P5-R1 实证：small-case 探针 dual 攻击返回 inf）。
+            import math
+            costs = []
+            for v in rep.values():
+                if not hasattr(v, "get") or v.get("rop") is None:
+                    continue
+                fv = float(v["rop"])
+                if math.isfinite(fv) and fv > 0:
+                    costs.append(fv)
             if not costs:
                 raise ValueError(f"estimate 返回空（attacks={list(rep) if isinstance(rep, dict) else rep}）")
             best = min(costs)
