@@ -131,26 +131,37 @@ def part_plaintext(rounds: int) -> dict:
 
 # ---------------------------------------------------------------- 3. 密文矩阵
 
-def part_cipher_matrix(layers, cipher_rounds: int) -> dict:
+def part_cipher_matrix(layers, cipher_rounds: int,
+                       round_offset: int = 0,
+                       rounds_per_run: int = 0) -> dict:
+    """密文矩阵（支持分段子进程：SEAL 池 + 对角线缓存的峰值在本机
+    （可用 ~12GB）下随轮数增长，20 轮单进程必然 OOM——每段 5 轮独立
+    进程、记录按 round 序号合并、统计跨段重算）。
+
+    调用契约：--round-offset <已完成的轮数> --rounds-per-run <本段轮数>
+    （0=一次跑满 cipher_rounds）。层内记录去重键=round。"""
     from src.model.loader import BertSentimentPipeline
     from src.model.pipeline import ModeBPipeline, PipelineConfig
     plain = BertSentimentPipeline()
-    # P6-R1 OOM 修复：_diag_cache 随层数累积（每权重 ~100MB 明文对角线集，
-    # 4+8+12 单进程合计 ~14.4GB 必然 OOM）——每次调用只跑一个层配置，
-    # 由调用方逐层子进程隔离（缓存随进程消亡）+ JSON 合并。
+    # P6-R1 OOM 修复①：_diag_cache 随层配置累积（4+8+12 单进程 ~14.4GB）
+    # ——每进程只跑一个层配置；②本轮数分段（SEAL 池 20 轮碎片化增长）
     pipe = ModeBPipeline(plain, PipelineConfig(n_layer=min(layers), seq_tokens=2))
     existing = _load_json().get("cipher_matrix", {})
     out = dict(existing) if isinstance(existing, dict) else {}
     for k in layers:
         pipe.cfg.n_layer = k
-        recs = []
-        for i in range(cipher_rounds):
+        cell = out.get(f"modeB_layer{k}", {})
+        recs = {r["round"]: r for r in cell.get("records", [])}
+        n_new = rounds_per_run or cipher_rounds
+        for i in range(round_offset, round_offset + n_new):
+            if i >= cipher_rounds or i in recs:
+                continue
             before_conv = pipe.stats.conversions
             with MemoryTracker() as mem:
                 t0 = time.perf_counter()
                 r = pipe.classify(SENTENCE)
                 wall = (time.perf_counter() - t0) * 1000
-            recs.append({
+            recs[i] = {
                 "round": i, "wall_ms": wall,
                 "label": r["label"], "prob": r["prob"],
                 "conversions": r["conversions"] - before_conv,
@@ -158,14 +169,17 @@ def part_cipher_matrix(layers, cipher_rounds: int) -> dict:
                 "mpc_comm_bytes": r["mpc_comm_bytes"],
                 "peak_delta_bytes": mem.result()["peak_delta_bytes"],
                 "segments_ms": r["segments_ms"],
-            })
+            }
+        ordered = [recs[i] for i in sorted(recs)]
         out[f"modeB_layer{k}"] = {
-            "n_layer": k, "seq_tokens": 2, "rounds": cipher_rounds,
-            "wall_ms": _stats(recs, "wall_ms"),
-            "peak_delta_bytes": _stats(recs, "peak_delta_bytes"),
-            "conversions_per_round": recs[-1]["conversions"],
-            "label_stability": len({r["label"] for r in recs}) == 1,
-            "records": recs,
+            "n_layer": k, "seq_tokens": 2,
+            "rounds_target": cipher_rounds,
+            "rounds_done": len(ordered),
+            "wall_ms": _stats(ordered, "wall_ms") if ordered else {},
+            "peak_delta_bytes": _stats(ordered, "peak_delta_bytes") if ordered else {},
+            "conversions_per_round": ordered[-1]["conversions"] if ordered else 0,
+            "label_stability": len({r["label"] for r in ordered}) == 1 if ordered else None,
+            "records": ordered,
         }
     out["modeA"] = out.get("modeA", {
         "status": "N/A（本栈不可实例化）",
@@ -628,6 +642,10 @@ def main(argv=None) -> int:
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--cipher-rounds", type=int, default=20)
     parser.add_argument("--layers", default="4,8,12")
+    parser.add_argument("--round-offset", type=int, default=0,
+                        help="本轮从第几轮开始（分段子进程合并口径）")
+    parser.add_argument("--rounds-per-run", type=int, default=0,
+                        help="本轮跑多少轮（0=跑满 cipher_rounds）")
     parser.add_argument("--quick", action="store_true", help="各部分 1 轮冒烟")
     args = parser.parse_args(argv)
     rounds = 1 if args.quick else args.rounds
@@ -659,7 +677,8 @@ def main(argv=None) -> int:
         elif part == "plaintext":
             report["plaintext"] = part_plaintext(rounds)
         elif part == "cipher_matrix":
-            report["cipher_matrix"] = part_cipher_matrix(layers, cipher_rounds)
+            report["cipher_matrix"] = part_cipher_matrix(
+                layers, cipher_rounds, args.round_offset, args.rounds_per_run)
         elif part == "traffic":
             report["traffic"] = part_traffic()
         elif part == "node_memory":

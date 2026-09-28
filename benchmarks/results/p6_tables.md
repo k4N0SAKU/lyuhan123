@@ -37,8 +37,13 @@
 
 | 配置 | token 一致率 | 体积 (MB) | 时延 P50 (ms) | 方案分布 |
 |---|---|---|---|---|
-| default_q22 | 1.0000 | 474.7 | 915 | {'q22': '全部 Conv1D/Linear/Embedding'} |
-| pure_int8 | 0.8906 | 268.1 | 890 | {'int8': 48} |
-| adaptive | 0.8906 | 268.1 | 878 | {'int8': 48} |
+| default_q22 | 1.0000 | 474.7 | 915 | {"q22": "全部 Conv1D/Linear/Embedding"} |
+| pure_int8 | 0.8906 | 268.1 | 890 | {"int8": 48} |
+| adaptive | 0.8906 | 268.1 | 878 | {"int8": 48} |
+| ladder_per_layer | 0.8906 | 459.5 | 712 | {"int8": 0, "fp16": 48} |
+| conv_int8_emb_q22 | 0.8906 | 231.7 | 686 | {"embedding": "q22", "conv1d": "int8"} |
+| conv_fp16_emb_q22 | 1.0000 | 312.7 | 699 | {"embedding": "q22", "conv1d": "fp16"} |
+| conv_q22_emb_fp16 | 0.9437 | 399.6 | 685 | {"embedding": "fp16", "conv1d": "q22"} |
+| conv_q22_emb_int8 | 0.3063 | 362.0 | 733 | {"embedding": "int8", "conv1d": "q22"} |
 
 FP32 参考体积：474.7 MB
