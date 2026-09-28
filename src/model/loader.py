@@ -21,7 +21,11 @@ from src.model.quantize import (FixedPointQuantizer, encoder_layer_outputs,
                                 quantize_model_weights, register_activation_qdq)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MODELS_DIR = REPO_ROOT / "data" / "models"
+# 模型目录可经 A122_MODELS_DIR 覆盖（P6 复现脚本：干净 venv 复用本地模型数据，
+# 模型是数据不是代码——环境洁净性不受影响，docs/06 §2）
+import os as _os
+MODELS_DIR = Path(_os.environ.get("A122_MODELS_DIR",
+                                  str(REPO_ROOT / "data" / "models")))
 SENTIMENT_FT_DIR = MODELS_DIR / "bert-base-chinese-sentiment"
 
 LABEL_MAP = {0: "负面", 1: "正面"}

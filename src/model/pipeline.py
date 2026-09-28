@@ -310,6 +310,8 @@ class ModeBPipeline:
                 "conversions": self.stats.conversions,
                 "mpc_gates": self.env.gates_used,
                 "mpc_comm_bytes": self.env.comm_bytes,
+                "segments_ms": {n: sum(v) / len(v)
+                                for n, v in ctx.timer.samples_ms().items()},
                 "wall_s": time.perf_counter() - t0}
 
 

@@ -135,7 +135,8 @@ class BaseNode:
             "channels": {n: {"state": c.session.state.name,
                              "send_seq": c.current_seq("send"),
                              "recv_seq": c.current_seq("recv"),
-                             "km": c.km.audit_state()}
+                             "km": c.km.audit_state(),
+                             "net": c.meter.snapshot()}
                          for n, c in self.channels.items()},
             "audit_events": len(self.audit.entries),
         }

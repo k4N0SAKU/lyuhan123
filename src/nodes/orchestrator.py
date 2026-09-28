@@ -278,6 +278,24 @@ def _mp_node_worker(node_id: str, prov_dir: str, links_spec: List[dict],
                                spec["ends"][0] == node_id)
 
     report = {"node_id": node_id, "commands": []}
+    # 各节点峰值内存口径：本进程 RSS 后台自采样（psutil，20ms）
+    import threading
+    import psutil
+    _proc = psutil.Process()
+    _rss_peak = [0]
+
+    def _sample_rss():
+        import time
+        while not _stop.is_set():
+            try:
+                _rss_peak[0] = max(_rss_peak[0], _proc.memory_info().rss)
+            except Exception:
+                pass
+            time.sleep(0.02)
+
+    from threading import Event
+    _stop = Event()
+    threading.Thread(target=_sample_rss, daemon=True).start()
     while True:
         cmd, arg = commands.get(timeout=120)
         if cmd == "establish":
@@ -302,8 +320,10 @@ def _mp_node_worker(node_id: str, prov_dir: str, links_spec: List[dict],
                                  for k, v in node.destroy_all("mp_smoke").items()}
             report["commands"].append({"cmd": "destroy", "ok": True})
         elif cmd == "report":
+            _stop.set()
             merged = node.export_report()
             merged.update(report)
+            merged["peak_rss_bytes"] = _rss_peak[0]
             results.put(merged)
             return
 
