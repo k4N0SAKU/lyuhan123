@@ -84,11 +84,11 @@ DEMO_DIR="$(mktemp -d /tmp/a122_repro_XXXX)"
 "$PY" -m src.nodes.provision --dir "$DEMO_DIR" --toy 2>&1 | tee "$LOG_DIR/5_provision.log" \
   || fail "离线供给失败"
 "$PY" -m src.nodes.orchestrator --prov-dir "$DEMO_DIR" --toy \
-  --out "$DEMO_DIR/report.json" 2>&1 | tee "$LOG_DIR/5_lifecycle.log" \
+  --out report_repro.json 2>&1 | tee "$LOG_DIR/5_lifecycle.log" \
   || fail "密态推理生命周期 e2e 失败"
 "$PY" -c "
 import json
-r = json.load(open('$DEMO_DIR/report.json', encoding='utf-8'))
+r = json.load(open('report_repro.json', encoding='utf-8'))
 assert r['audit_chain_verified'] == {'p0_client': True, 'p1_keynode': True, 'p2_infernode': True}
 assert r['phases']['inference']['max_abs_err'] < 1e-5
 print('生命周期 e2e：审计链三节点核验通过；密态往返 max_abs_err =',
@@ -106,7 +106,7 @@ cat <<BANNER
 ===============================================================
 复现成功 $(date -u +%FT%TZ)——共 $STEP 步全部通过
 - 明文基线：benchmarks/results/p6_full_bench.json :: plaintext
-- 密态推理：$DEMO_DIR/report.json（audit_chain_verified 全 True）
+- 密态推理：report_repro.json（audit_chain_verified 全 True）
 - 攻击判定：benchmarks/results/attack_verdicts.json
 扩展：python -m benchmarks.run_full_bench --parts cipher_matrix \\
   --cipher-rounds 20   # 密文矩阵（4/8/12 层 × 20 轮，~4h）
