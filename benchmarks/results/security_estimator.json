@@ -1,12 +1,35 @@
 {
+  "schema": "a122-perf/1",
+  "kind": "security-estimator",
+  "workload": "lattice-estimator (malb) @ SageMath 10.x (WSL conda-forge)",
+  "model": "LWE, Xs=Ternary(单例), Xe=DiscreteGaussian(3.2)",
+  "provenance": {
+    "first_run_log": "benchmarks/results/estimator_logs/first_run_20260927.log（estimator 原生输出存档）",
+    "note": "本 JSON 数值从原生日志解析（estimator 自身输出）。提取代码历经 4 次修复——根因实证：Cost 是 collections.UserDict 子类（非 dict），isinstance 恒 False；且不可行攻击 rop=+Infinity 需过滤。修复已入脚本（security_estimator.py），未来运行直接产出完整 JSON。",
+    "rerun_incident": "2026-09-28 重跑完成但提取仍用旧代码（进程早于最终修复加载），且其日志因 WSL /tmp 回收丢失——证据教训：后台任务产出必须立即归档入仓，不留 /tmp"
+  },
   "A_modeb_2p15_200bit": {
     "n": 32768,
     "chain_bits": 200,
-    "error": "ValueError(\"estimate \u8fd4\u56de\u7a7a\uff08attacks=['usvp', 'bdd', 'bdd_hybrid', 'bdd_mitm_hybrid', 'dual', 'dual_hybrid']\uff09\")"
+    "attacks_observed_in_log": {
+      "bdd_hybrid": 8666.4,
+      "bdd_mitm_hybrid": 5868.4
+    },
+    "best_rop_log10_2": 5868.4,
+    "completeness": "部分（存档日志仅含 bdd_hybrid/bdd_mitm_hybrid 两条；usvp/bdd/dual 未捕获——决策非必需：A 链短于 C，安全性不低于 C 已满足的方向性证据 + SEAL TC128 表锚定）"
   },
   "C_decision_2p16_1720bit": {
     "n": 65536,
     "chain_bits": 1720,
-    "error": "ValueError(\"estimate \u8fd4\u56de\u7a7a\uff08attacks=['usvp', 'bdd', 'bdd_hybrid', 'bdd_mitm_hybrid', 'dual', 'dual_hybrid']\uff09\")"
-  }
+    "attacks_observed_in_log": {
+      "usvp": 130.2,
+      "bdd": 130.2,
+      "dual": 131.0,
+      "dual_hybrid": 131.3
+    },
+    "best_rop_log10_2": 130.2,
+    "completeness": "完整（usvp/bdd/dual/dual_hybrid 全在存档日志）",
+    "meets_128bit_classical": true
+  },
+  "decision_note": "C(2^16/1720bit) best=2^130.2 ≥ 2^128 classical ⇒ 切换判据满足（P3 评审预案：切 2^16——转换减半、L=16 单密文；代价=密文 3.3MB+SEC_LEVEL_NONE 显式声明+最小步长 Galois 集 68s 已实测）"
 }
