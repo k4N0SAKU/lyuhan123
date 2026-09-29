@@ -13,7 +13,7 @@
 
 夹具为 module 级（pytest 8 对类内 class-scoped fixture 弃用告警——P5-R1）。
 
-运行：pytest tests/attack/test_collusion.py -v        （模式 A 快；模式 B slow）
+运行：pytest tests/attack/test_collusion.py -v（两模式均在默认口径；模式 B 首次加载 BERT ~30s）
 """
 from __future__ import annotations
 

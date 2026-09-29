@@ -556,17 +556,23 @@ def part_tables() -> dict:
 
     if "cipher_matrix" in data:
         lines += ["## 2. 密文推理矩阵（模式 B × 层数；L=2；D8：JSON 可追溯）", "",
-                  "| 配置 | 轮数 | 端到端 P50 (ms) | P95 (ms) | 均值 (ms) | "
-                  "峰值内存增量 (MB) | 转换数/轮 |", "|---|---|---|---|---|---|---|"]
+                  "| 配置 | 轮数 | 端到端 P50 (s) | P95 (s) | 最长轮 (s) | "
+                  "内存增量 P50 (MiB) | 内存增量 max (MiB) | 转换数/轮 |",
+                  "|---|---|---|---|---|---|---|---|"]
         for k in (4, 8, 12):
             cell = data["cipher_matrix"].get(f"modeB_layer{k}")
             if not cell:
                 continue
-            mb = cell["peak_delta_bytes"]["p50"] / 1048576
+            recs = cell.get("records", [])
+            peak_max = (max(r["peak_delta_bytes"] for r in recs) / 1048576
+                        if recs else 0)
+            wall_max = (max(r["wall_ms"] for r in recs) / 1000
+                        if recs else 0)
+            p50m = cell["peak_delta_bytes"]["p50"] / 1048576
             lines.append(f"| 模式B/{k}层 | {cell['rounds_done']}/{cell['rounds_target']} | "
-                         f"{cell['wall_ms']['p50']:.0f} | "
-                         f"{cell['wall_ms']['p95']:.0f} | "
-                         f"{cell['wall_ms']['mean']:.0f} | {mb:.1f} | "
+                         f"{cell['wall_ms']['p50']/1000:.1f} | "
+                         f"{cell['wall_ms']['p95']/1000:.1f} | "
+                         f"{wall_max:.1f} | {p50m:.1f} | {peak_max:.1f} | "
                          f"{cell['conversions_per_round']} |")
         lines += [f"| 模式A/4·8·12层 | - | N/A | N/A | N/A | N/A | N/A |",
                   "", "模式 A：本栈不可实例化（docs/01 §5.3）——N/A 如实申报。", ""]
