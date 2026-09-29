@@ -21,6 +21,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUT = REPO_ROOT / "benchmarks" / "results" / "security_estimator.json"
+# P6-R2 双输出路径（事故修复）：--smoke 与 A/C 决策运行曾共用单 OUT——
+# smoke 重跑把决策 JSON（A/C 组+provenance+终裁依据）整体覆盖（P6-R2 第 1 项）。
+# 此后 smoke 一律写 estimator_logs/，决策文件只由 A/C 运行产出。
 
 
 def _load_estimator():
@@ -118,8 +121,14 @@ def main() -> int:
             results[name] = {"n": c["n"], "chain_bits": c["bits"], "error": repr(exc)}
             print(f"{name}: FAILED {exc!r}")
 
-    OUT.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
-    print(f"-> {OUT}")
+    # 双输出路径（P6-R2 第 1 项修复）：smoke 数据仅存 estimator_logs/
+    if args.smoke:
+        out_path = (REPO_ROOT / "benchmarks" / "results" / "estimator_logs"
+                    / f"smoke_{time.strftime('%Y%m%d_%H%M%S')}.json")
+    else:
+        out_path = OUT
+    out_path.write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
+    print(f"-> {out_path}")
     return 0
 
 

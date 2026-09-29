@@ -99,7 +99,7 @@ ok "密态推理（认证→会话→GCM 推理往返→ratchet→销毁→审�
 # ---- STEP 6: 攻击测试套件 -----------------------------------------------------
 "$PY" -m pytest tests/attack -q 2>&1 | tee "$LOG_DIR/6_attacks.log" \
   || fail "攻击测试套件失败"
-ok "攻击测试（默认口径含合谋双模式——窃听/中间人/篡改/重放/合谋，38 项；模式B slow 扩展用 -o addopts=）"
+ok "攻击测试（默认口径含合谋双模式——窃听/中间人/篡改/重放/合谋，38 项）"
 
 # ---- STEP 7: 结论 -------------------------------------------------------------
 cat <<BANNER
@@ -109,7 +109,8 @@ cat <<BANNER
 - 密态推理：report_repro.json（audit_chain_verified 全 True）
 - 攻击判定：benchmarks/results/attack_verdicts.json
 扩展：python -m benchmarks.run_full_bench --parts cipher_matrix \\
-  --cipher-rounds 20   # 密文矩阵（4/8/12 层 × 20 轮，~4h）
+  --cipher-rounds 20 --segmented   # 密文矩阵（--segmented 必带：单进程形态
+  在 32GB 机确定性 OOM；总时长 ~4h + 最长轮 33min）
       python -m pytest tests/attack -o addopts=  # 攻击全套（含模式 B 合谋）
 逐步日志：$LOG_DIR
 ===============================================================
