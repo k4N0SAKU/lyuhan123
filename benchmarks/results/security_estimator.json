@@ -1,35 +1,17 @@
 {
-  "schema": "a122-perf/1",
-  "kind": "security-estimator",
-  "workload": "lattice-estimator (malb) @ SageMath 10.x (WSL conda-forge)",
-  "model": "LWE, Xs=Ternary(单例), Xe=DiscreteGaussian(3.2)",
-  "provenance": {
-    "first_run_log": "benchmarks/results/estimator_logs/first_run_20260927.log（estimator 原生输出存档）",
-    "note": "本 JSON 数值从原生日志解析（estimator 自身输出）。提取代码历经 4 次修复——根因实证：Cost 是 collections.UserDict 子类（非 dict），isinstance 恒 False；且不可行攻击 rop=+Infinity 需过滤。修复已入脚本（security_estimator.py），未来运行直接产出完整 JSON。",
-    "rerun_incident": "2026-09-28 重跑完成但提取仍用旧代码（进程早于最终修复加载），且其日志因 WSL /tmp 回收丢失——证据教训：后台任务产出必须立即归档入仓，不留 /tmp"
-  },
-  "A_modeb_2p15_200bit": {
-    "n": 32768,
-    "chain_bits": 200,
-    "attacks_observed_in_log": {
-      "bdd_hybrid": 8666.4,
-      "bdd_mitm_hybrid": 5868.4
-    },
-    "best_rop_log10_2": 5868.4,
-    "completeness": "部分（存档日志仅含 bdd_hybrid/bdd_mitm_hybrid 两条；usvp/bdd/dual 未捕获——决策非必需：A 链短于 C，安全性不低于 C 已满足的方向性证据 + SEAL TC128 表锚定）"
-  },
-  "C_decision_2p16_1720bit": {
-    "n": 65536,
-    "chain_bits": 1720,
-    "attacks_observed_in_log": {
-      "usvp": 130.2,
-      "bdd": 130.2,
-      "dual": 131.0,
-      "dual_hybrid": 131.3
-    },
-    "best_rop_log10_2": 130.2,
-    "completeness": "完整（usvp/bdd/dual/dual_hybrid 全在存档日志）",
-    "meets_128bit_classical": true
-  },
-  "decision_note": "C(2^16/1720bit) best=2^130.2 ≥ 2^128 classical ⇒ 切换判据满足（P3 评审预案：切 2^16——转换减半、L=16 单密文；代价=密文 3.3MB+SEC_LEVEL_NONE 显式声明+最小步长 Galois 集 68s 已实测）"
+  "note": "\u7ba1\u7ebf\u9a8c\u8bc1/\u73a9\u5177\u53c2\u6570\u2014\u2014\u4ec5\u8bc1\u660e\u63d0\u53d6\u4fee\u590d\u540e\u53ef\u4ea7\u51fa\u53ef\u9a8c\u8bc1 JSON\uff1b113-bit \u4e3a\u8be5\u73a9\u5177\u53c2\u6570\u7ec4\uff08n=2048/q=2^60\uff09\u7684\u5b89\u5168\u6c34\u5e73\uff0c\u975e A1-22 \u65b9\u6848\u53c2\u6570\u7684\u5b89\u5168\u4e3b\u5f20\uff08\u65b9\u6848\u53c2\u6570 A/C \u89c1 --quick\uff09",
+  "SMOKE_n2048_q60": {
+    "n": 2048,
+    "chain_bits": 60,
+    "security_bits": 113,
+    "wall_s": 62.3,
+    "detail": {
+      "usvp": "         rop: \u22482^113.9\n         red: \u22482^113.9\n           \u03b4: 1.004964\n           \u03b2:      289\n           d:     3889\n         tag:     usvp",
+      "bdd": "         rop: \u22482^113.0\n         red: \u22482^112.9\n         svp: \u22482^109.3\n           \u03b2:      285\n           \u03b7:      314\n           d:     4007\n         tag:      bdd",
+      "bdd_hybrid": "         rop: \u22482^113.0\n         red: \u22482^112.9\n         svp: \u22482^109.3\n           \u03b2:      285\n           \u03b7:      314\n           \u03b6:        0\n         |S|:        1\n           d:     4061\n        prob:      1.0\n           \u21bb:        1\n         tag:   hybrid",
+      "bdd_mitm_hybrid": "         rop: \u22482^159.1\n         red: \u22482^157.5\n         svp: \u22482^158.6\n           \u03b2:      289\n           \u03b7:        2\n           \u03b6:      115\n         |S|: \u22482^182.3\n           d:     3963\n        prob: \u22482^-41.3\n           \u21bb: \u22482^43.5\n         tag:   hybrid",
+      "dual": "         rop: \u22482^115.6\n         mem: \u22482^72.6\n           m:     2041\n           \u03b2:      291\n           d:     4089\n           \u21bb:        1\n         tag:     dual",
+      "dual_hybrid": "         rop: \u22482^113.6\n         red: \u22482^113.6\n       guess: \u22482^101.6\n           \u03b2:      284\n           p:        3\n           \u03b6:       10\n           t:       40\n          \u03b2':      303\n           N: \u22482^60.6\n           m: \u22482^11.0"
+    }
+  }
 }

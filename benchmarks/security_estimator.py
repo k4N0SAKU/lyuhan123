@@ -74,6 +74,11 @@ def main() -> int:
                  if k.startswith("C") or k.startswith("A")}   # 决策组：A+C
 
     results = {}
+    if args.smoke:
+        # F①：note 显式入档——裸 113-bit 有被误读风险（玩具参数，非方案安全主张）
+        results["note"] = ("管线验证/玩具参数——仅证明提取修复后可产出可验证 JSON；"
+                           "113-bit 为该玩具参数组（n=2048/q=2^60）的安全水平，"
+                           "非 A1-22 方案参数的安全主张（方案参数 A/C 见 --quick）")
     for name, c in cases.items():
         q = 2 ** c["bits"]
         params = LWE.Parameters(
