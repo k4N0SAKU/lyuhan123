@@ -3,7 +3,7 @@
     "n": 2048,
     "chain_bits": 60,
     "security_bits": 113,
-    "wall_s": 54.0,
+    "wall_s": 67.7,
     "detail": {
       "usvp": "         rop: \u22482^113.9\n         red: \u22482^113.9\n           \u03b4: 1.004964\n           \u03b2:      289\n           d:     3889\n         tag:     usvp",
       "bdd": "         rop: \u22482^113.0\n         red: \u22482^112.9\n         svp: \u22482^109.3\n           \u03b2:      285\n           \u03b7:      314\n           d:     4007\n         tag:      bdd",

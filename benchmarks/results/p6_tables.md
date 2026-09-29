@@ -44,17 +44,20 @@
 
 结论：对角线+BSGS 胜出（实测 5× 量级）——P2 推测『row-sum 或快 1.3×』被否定：BSGS 将旋转压到 2√d，而 row-sum 的 d 次旋转在 ρ≈1.7 下不可回收；解析单位模型低估了环上全宽明文编码成本（P6 实测口径）
 
-## 5. C2 参数自适应 A/B（GPT-2；20 prompts × 16 token）
+## 5. C2 参数自适应 A/B（GPT-2；20 prompts × 16 token；docs/05 注入源）
 
-| 配置 | token 一致率 | 体积 (MB) | 时延 P50 (ms) | 方案分布 |
-|---|---|---|---|---|
-| default_q22 | 1.0000 | 474.7 | 915 | {"q22": "全部 Conv1D/Linear/Embedding"} |
-| pure_int8 | 0.8906 | 268.1 | 890 | {"int8": 48} |
-| adaptive | 0.8906 | 268.1 | 878 | {"int8": 48} |
-| ladder_per_layer | 0.8906 | 459.5 | 712 | {"int8": 0, "fp16": 48} |
-| conv_int8_emb_q22 | 0.8906 | 231.7 | 686 | {"embedding": "q22", "conv1d": "int8"} |
-| conv_fp16_emb_q22 | 1.0000 | 312.7 | 699 | {"embedding": "q22", "conv1d": "fp16"} |
-| conv_q22_emb_fp16 | 0.9437 | 399.6 | 685 | {"embedding": "fp16", "conv1d": "q22"} |
-| conv_q22_emb_int8 | 0.3063 | 362.0 | 733 | {"embedding": "int8", "conv1d": "q22"} |
+| 配置 | token 一致率 | 体积 (MiB) | 时延 P50 (ms) | 判定 | 方案分布 |
+|---|---|---|---|---|---|
+| default_q22 | 1.0000 | 474.7 | 915 | ✅ P0 默认档（可复现锚点） | {"q22": "全部 Conv1D/Linear/Embedding"} |
+| pure_int8 | 0.8906 | 268.1 | 890 | ✗ 一致率不足 | {"int8": 48} |
+| adaptive | 0.8906 | 268.1 | 878 | ✗ 退化为 pure_int8（阈值判据失效） | {"int8": 48} |
+| ladder_per_layer | 0.8906 | 459.5 | 712 | ✗ 升级无效（级联定型） | {"int8": 0, "fp16": 48} |
+| conv_int8_emb_q22 | 0.8906 | 231.7 | 686 | ✗ 一致率不足 | {"embedding": "q22", "conv1d": "int8"} |
+| conv_fp16_emb_q22 | 1.0000 | 312.7 | 699 | ✅ 合规第二点（−34.1% 体积） | {"embedding": "q22", "conv1d": "fp16"} |
+| conv_q22_emb_fp16 | 0.9437 | 399.6 | 685 | ✗ 差 0.63pp | {"embedding": "fp16", "conv1d": "q22"} |
+| conv_q22_emb_int8 | 0.3063 | 362.0 | 733 | ✗ 灾难 | {"embedding": "int8", "conv1d": "q22"} |
 
-FP32 参考体积：474.7 MB
+层级升级 trace：[{"upgraded_layer": 0, "agreement": 0.8906}, {"upgraded_layer": 1, "agreement": 0.8906}, {"upgraded_layer": 2, "agreement": 0.8906}, {"upgraded_layer": 3, "agreement": 0.8906}, {"upgraded_layer": 4, "agreement": 0.8906}, {"upgraded_layer": 5, "agreement": 0.8906}, {"upgraded_layer": 6, "agreement": 0.8906}, {"upgraded_layer": 7, "agreement": 0.8906}, {"upgraded_layer": 8, "agreement": 0.8906}, {"upgraded_layer": 9, "agreement": 0.8906}, {"upgraded_layer": 10, "agreement": 0.8906}, {"upgraded_layer": 11, "agreement": 0.8906}]
+
+
+FP32 参考体积：474.7 MiB

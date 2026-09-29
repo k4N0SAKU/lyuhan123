@@ -613,12 +613,21 @@ def part_tables() -> dict:
 
     if "c2_selector" in data:
         c2 = data["c2_selector"]
-        lines += ["## 5. C2 参数自适应 A/B（GPT-2；20 prompts × 16 token）", "",
-                  "| 配置 | token 一致率 | 体积 (MB) | 时延 P50 (ms) | 方案分布 |",
-                  "|---|---|---|---|---|"]
+        lines += ["## 5. C2 参数自适应 A/B（GPT-2；20 prompts × 16 token；"
+                  "docs/05 注入源）", "",
+                  "| 配置 | token 一致率 | 体积 (MiB) | 时延 P50 (ms) | 判定 | 方案分布 |",
+                  "|---|---|---|---|---|---|"]
         rows = ["default_q22", "pure_int8", "adaptive", "ladder_per_layer",
                 "conv_int8_emb_q22", "conv_fp16_emb_q22",
                 "conv_q22_emb_fp16", "conv_q22_emb_int8"]
+        verdict = {"default_q22": "✅ P0 默认档（可复现锚点）",
+                   "pure_int8": "✗ 一致率不足",
+                   "adaptive": "✗ 退化为 pure_int8（阈值判据失效）",
+                   "ladder_per_layer": "✗ 升级无效（级联定型）",
+                   "conv_int8_emb_q22": "✗ 一致率不足",
+                   "conv_fp16_emb_q22": "✅ 合规第二点（−34.1% 体积）",
+                   "conv_q22_emb_fp16": "✗ 差 0.63pp",
+                   "conv_q22_emb_int8": "✗ 灾难"}
         for name in rows:
             c = c2.get(name)
             if not c:
@@ -628,9 +637,13 @@ def part_tables() -> dict:
                       if isinstance(hist, dict) else str(hist))
             lines.append(f"| {name} | {c['token_agreement_vs_fp32']:.4f} | "
                          f"{c['size_bytes']/1048576:.1f} | "
-                         f"{c['latency']['p50']:.0f} | {hist_s} |")
+                         f"{c['latency']['p50']:.0f} | {verdict.get(name,'')} | "
+                         f"{hist_s} |")
+        if "ladder_per_layer" in c2:
+            lines += ["", f"层级升级 trace："
+                      f"{json.dumps(c2['ladder_per_layer'].get('upgrade_trace', []), ensure_ascii=False)}", ""]
         lines += ["", f"FP32 参考体积："
-                      f"{c2.get('fp32_reference_size_bytes', 0)/1048576:.1f} MB",
+                      f"{c2.get('fp32_reference_size_bytes', 0)/1048576:.1f} MiB",
                   ""]
 
     TABLES_MD.write_text("\n".join(lines), encoding="utf-8")
@@ -652,6 +665,10 @@ def main(argv=None) -> int:
                         help="本轮从第几轮开始（分段子进程合并口径）")
     parser.add_argument("--rounds-per-run", type=int, default=0,
                         help="本轮跑多少轮（0=跑满 cipher_rounds）")
+    parser.add_argument("--segmented", action="store_true",
+                        help="cipher_matrix 分段自编排（每配置×5 轮段子进程+合并"
+                             "——规避单进程三配置 OOM，P6-R1 事故修复的默认推荐"
+                             "形态；复现命令必须带此标志）")
     parser.add_argument("--quick", action="store_true", help="各部分 1 轮冒烟")
     args = parser.parse_args(argv)
     rounds = 1 if args.quick else args.rounds
@@ -683,8 +700,23 @@ def main(argv=None) -> int:
         elif part == "plaintext":
             report["plaintext"] = part_plaintext(rounds)
         elif part == "cipher_matrix":
-            report["cipher_matrix"] = part_cipher_matrix(
-                layers, cipher_rounds, args.round_offset, args.rounds_per_run)
+            if args.segmented:
+                # P6-R1：分段自编排（每配置×5 轮段子进程 + 合并——单进程三配置
+                # 在 32GB 机器确定性 OOM，见 P6 记录 §7c 重试证据）
+                import subprocess
+                import sys as _sys
+                for L in layers:
+                    for off in range(0, cipher_rounds, 5):
+                        seg = [ _sys.executable, "-m", "benchmarks.run_full_bench",
+                                "--parts", "cipher_matrix", "--layers", str(L),
+                                "--round-offset", str(off), "--rounds-per-run", "5",
+                                "--cipher-rounds", str(cipher_rounds)]
+                        print(f"=== segmented L={L} offset={off} ===", flush=True)
+                        subprocess.run(seg, check=True)
+                report["cipher_matrix"] = _load_json().get("cipher_matrix", {})
+            else:
+                report["cipher_matrix"] = part_cipher_matrix(
+                    layers, cipher_rounds, args.round_offset, args.rounds_per_run)
         elif part == "traffic":
             report["traffic"] = part_traffic()
         elif part == "node_memory":

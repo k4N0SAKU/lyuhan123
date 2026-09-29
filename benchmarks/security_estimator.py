@@ -66,6 +66,9 @@ def main() -> int:
     }
     if args.smoke:
         cases = {"SMOKE_n2048_q60": dict(n=2048, bits=60)}
+        smoke_note = ("管线验证/玩具参数——仅证明提取修复后可产出可验证 JSON；"
+                      "113-bit 为该玩具参数组的安全水平，非 A1-22 方案参数的"
+                      "安全主张（方案参数 A/C 见 --quick）")
     elif args.quick:
         cases = {k: v for k, v in cases.items()
                  if k.startswith("C") or k.startswith("A")}   # 决策组：A+C
