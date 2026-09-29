@@ -10,6 +10,7 @@ prev_hash = 32B 零。防篡改性质：改动任一条目任何字段 ⇒ 该�
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
@@ -60,16 +61,21 @@ class AuditLog:
         self.actor = actor
         self._clock_ms = clock_ms or _default_clock_ms
         self.entries: List[AuditEvent] = []
+        # P7：单节点可有多条链路并发 establish（各线程均可能写审计）——
+        # append 必须原子（seq/prev_hash 读改写），否则哈希链被交错破坏
+        # （冒烟实证：audit_ok=False，两链路并发同节点竞态）
+        self._append_lock = threading.Lock()
 
     def append(self, actor: str, event: str, detail: dict | None = None) -> AuditEvent:
-        """追加事件并接入哈希链（canonical 序列化 -> SM3）。"""
-        ev = AuditEvent(seq=len(self.entries) + 1, ts_ms=self._clock_ms(),
-                        actor=actor or self.actor, event=event,
-                        detail=dict(detail or {}))
-        prev = self.entries[-1].hash if self.entries else ZERO32
-        ev.compute_hash(prev)
-        self.entries.append(ev)
-        return ev
+        """追加事件并接入哈希链（canonical 序列化 -> SM3；线程安全）。"""
+        with self._append_lock:
+            ev = AuditEvent(seq=len(self.entries) + 1, ts_ms=self._clock_ms(),
+                            actor=actor or self.actor, event=event,
+                            detail=dict(detail or {}))
+            prev = self.entries[-1].hash if self.entries else ZERO32
+            ev.compute_hash(prev)
+            self.entries.append(ev)
+            return ev
 
     def verify_chain(self) -> bool:
         """全链重算校验；任一条目被改 -> False（F5 审计防篡改测试）。"""
