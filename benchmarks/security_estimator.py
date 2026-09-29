@@ -26,7 +26,8 @@ OUT = REPO_ROOT / "benchmarks" / "results" / "security_estimator.json"
 def _load_estimator():
     import glob
     candidates = []
-    for base in ("C:/Users/27471/AppData/Local/Temp/le",
+    for base in ("/opt/le",   # P6：持久位置（WSL /tmp 跨 VM 重启易失，P6 事故）
+                 "C:/Users/27471/AppData/Local/Temp/le",
                  "/tmp/le", str(Path.home() / "AppData/Local/Temp/le")):
         candidates += glob.glob(base)
     for c in candidates:
@@ -47,6 +48,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--quick", action="store_true",
                         help="只跑决策关键参数 C（2^16/1720bit）")
+    parser.add_argument("--smoke", action="store_true",
+                        help="小参数冒烟（n=2048/q=2^60，~2min——提取修复验证用，"
+                             "P6 事故重试：验证 UserDict/inf 过滤后可产出可验证 JSON）")
     args = parser.parse_args()
 
     LWE = _load_estimator()
@@ -60,7 +64,9 @@ def main() -> int:
         "C_decision_2p16_1720bit": dict(n=1 << 16, bits=1720),
         "D_modea_2p17_3480bit": dict(n=1 << 17, bits=3480),
     }
-    if args.quick:
+    if args.smoke:
+        cases = {"SMOKE_n2048_q60": dict(n=2048, bits=60)}
+    elif args.quick:
         cases = {k: v for k, v in cases.items()
                  if k.startswith("C") or k.startswith("A")}   # 决策组：A+C
 
@@ -92,7 +98,7 @@ def main() -> int:
             if not costs:
                 raise ValueError(f"estimate 返回空（attacks={list(rep) if isinstance(rep, dict) else rep}）")
             best = min(costs)
-            bits_sec = float(best).bit_length()
+            bits_sec = int(best).bit_length()   # P6 重试修正：float 无 bit_length
             results[name] = {"n": c["n"], "chain_bits": c["bits"],
                              "security_bits": bits_sec,
                              "wall_s": round(time.perf_counter() - t0, 1),
