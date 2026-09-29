@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -61,6 +62,29 @@ class TestAuditChain:
         log.entries[1], log.entries[2] = log.entries[2], log.entries[1]
         ok, errs = verify_audit_entries(log.entries)
         assert not ok
+
+    def test_concurrent_append_200(self):
+        """P7-R1 必修①：200 次并发 append（4 线程×50）→ 链完好。
+
+        与演示冒烟抓到的竞态同源（单节点双链路 establish 并发写审计）——
+        锁修复后的持久化验证（原为一次性脚本，评审判"声明与交付不符"）。
+        """
+        import threading
+        log = AuditLog(actor="P1", clock_ms=lambda: 1790000000000)
+
+        def spam(tag):
+            for i in range(50):
+                log.append("P1", f"EVT_{tag}", {"i": i})
+
+        threads = [threading.Thread(target=spam, args=(t,)) for t in "abcd"]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        ok, errs = verify_audit_entries(log.entries)
+        assert len(log.entries) == 200
+        assert [e.seq for e in log.entries] == list(range(1, 201))
+        assert ok, errs[:3]
 
     def test_empty_chain_ok(self):
         ok, errs = verify_audit_entries([])
