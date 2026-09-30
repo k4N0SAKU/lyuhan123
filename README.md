@@ -18,6 +18,10 @@ SM2/SM3/SM4-GCM 管住身份认证、完整性校验与密钥全生命周期。
 | 形态 | 三方节点（P0 客户端 / P1 密钥节点 / P2 推理节点）+ 离线 CA + FastAPI 演示系统 |
 | 规模 | 代码 9,949 行 · 测试 243 passed + 16 deselected + 3 xfailed · 数据字典 93 条四检全绿 |
 
+<p align="center">
+  <img src="docs/实现流程图.svg" alt="A1-22 实现流程图（研发过程 + 运行时数据流）" width="880">
+</p>
+
 ## 目录
 
 1. [为什么需要这个项目](#1-为什么需要这个项目)
@@ -371,11 +375,7 @@ python scripts/check_docs_consistency.py   # 四检（数据字典/注入表/黑
 
 开发全程采用**阶段门工作流**：P0~P7 每阶段末输出工作记录 + 交付包（pN.zip +
 MANIFEST + sha256）+ 阶段报告，评审通过后进入下一阶段；全部过程留档
-[docs/phases/](docs/phases)。
-
-<p align="center">
-  <img src="docs/实现流程图.svg" alt="A1-22 实现流程图" width="880">
-</p>
+[docs/phases/](docs/phases)。研发过程与运行时数据流的全景图见顶部。
 
 | 阶段 | 目标 | 状态 |
 |---|---|---|
