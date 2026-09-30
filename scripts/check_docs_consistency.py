@@ -98,10 +98,6 @@ def check_cross_refs() -> list:
             problems.append(f"docs/{n} 缺失")
     if "data_dict" not in text:
         problems.append("00-方案概述 未声明数据字典")
-    # 七份终稿齐备（00~06）+ PPT/答辩问题清单存在（出口条件）
-    for extra in ("defense/PPT提纲与讲稿.md", "defense/评委问题清单.md"):
-        if not (DOCS / extra).exists():
-            problems.append(f"docs/{extra} 缺失")
     return problems
 
 

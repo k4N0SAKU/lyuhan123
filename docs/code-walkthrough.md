@@ -51,7 +51,7 @@ PROVISION → AUTHENTICATING → SESSION_READY → INFERRING ↔ DECRYPTING（�
 
 | 目录 | 一句话 | 关键内容 |
 |---|---|---|
-| `docs/` | 七份终稿 + 答辩材料 + 阶段记录 | 00~06 终稿；`defense/` PPT 讲稿+评委 Q&A；`phases/` P0~P7 工作记录+总结报告；`data_dict.json` **93 条数字权威** |
+| `docs/` | 七份终稿 + 阶段记录 | 00~06 终稿；`phases/` P0~P7 工作记录+总结报告；`data_dict.json` **93 条数字权威** |
 | `src/crypto/` | 密码原语层（P2） | Beaver 三元组、CKKS 封装、国密、秘密分享、门限解密模拟 |
 | `src/protocol/` | 协议控制面（P1 规格/P4 实现） | 消息格式、会话通道、SM2 认证、密钥生命周期、转换协议、审计链 |
 | `src/nodes/` | 三方节点编排（P4） | client/keynode/infernode + orchestrator + 离线供给 provision |

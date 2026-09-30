@@ -278,7 +278,7 @@ BumbleBee，含"不可比因素"说明列）见 [docs/04](docs/04-性能与基�
 5. **底座模型为演示级**：情感二分类微调（acc 99.0%）+ 截断层数演示管线——
    业务语义映射为示例，非生产模型（docs/04 §6 精度口径分表）；
 6. **精度评测外部锚点**：当前为自建数据集同源对照（n=200）；ChnSentiCorp 等
-   公开数据集的三口径评测为规划中的扩展工作（`scripts/predefense/` 已备脚本）。
+   公开数据集的三口径评测为规划中的扩展工作。
 
 ## 9. 快速开始
 
@@ -351,7 +351,7 @@ python scripts/check_docs_consistency.py   # 四检（数据字典/注入表/黑
 │  ├─ attack/                #   五类攻击套件 + 内存取证框架 framework.py
 │  └─ e2e/                   #   端到端：管线/生命周期/明文基线/演示稳定性（真实 uvicorn HTTP）
 ├─ docs/                     # 参赛文档七件套 + 数据字典 + 工程档案（§13）
-├─ scripts/                  # check_docs_consistency（四检）· gen_data_dict · reproduce.sh · predefense/
+├─ scripts/                  # check_docs_consistency（四检）· gen_data_dict · reproduce.sh
 ├─ deliverables/             # p0~p7 八个阶段交付包 + sha256 侧车
 ├─ reproduce_logs/           # 干净目录一键复现的逐步证据
 └─ data/models/              # 模型文件（~1.5GB，不入库：python -m benchmarks.download_models 一键复现）
@@ -385,7 +385,7 @@ MANIFEST + sha256）+ 阶段报告，评审通过后进入下一阶段；全部�
 | P4 | 认证与密钥全生命周期（证书 / 会话 / ratchet / 审计链 / 销毁） | ✅ 评审通过（2026-09-27） |
 | P5 | 威胁模型终稿 + 五类攻击自动化（38 项零告警，28+2+0） | ✅ 评审通过 |
 | P6 | 性能与基线对比（四指标 + 密文矩阵 20/20×3 + 创新点 C2/C3） | ✅ 评审通过 |
-| P7 | 演示系统 + 七文档终稿 + 答辩材料 + 终检（F1~F10：8 √ + 2 √*） | ✅ 终检通过（2026-09-30） |
+| P7 | 演示系统 + 七文档终稿 + 终检（F1~F10：8 √ + 2 √*） | ✅ 终检通过（2026-09-30） |
 
 ## 13. 文档与延伸材料
 
@@ -402,9 +402,6 @@ MANIFEST + sha256）+ 阶段报告，评审通过后进入下一阶段；全部�
 | [docs/code-walkthrough.md](docs/code-walkthrough.md) | 模块代码导读（按模块讲"这段代码在干嘛"） |
 | [docs/project-overview.md](docs/project-overview.md) | 项目详细介绍与全过程 |
 | [docs/phases/](docs/phases) | P0~P7 工作记录 + 项目总结报告 + 阶段任务登记 |
-| [docs/defense/](docs/defense) | PPT 提纲与讲稿 12 页（每页标数据出处）、评委 Q&A 20 条 |
-| [docs/demo-video-script.md](docs/demo-video-script.md) | 演示视频脚本 |
-| [scripts/predefense/](scripts/predefense) | 演示环境自检与评测脚本（目标机 e2e ≥3 轮 + ChnSentiCorp 评测） |
 
 ## 14. License
 
