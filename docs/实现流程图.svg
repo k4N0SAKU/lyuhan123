@@ -1,0 +1,312 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1640" height="3252" viewBox="0 0 1640 3252" font-family="Microsoft YaHei, PingFang SC, sans-serif">
+<rect x="0" y="0" width="1640" height="3252" fill="#FFFFFF"/>
+<rect x="0" y="0" width="1640" height="96" rx="0" fill="#0F172A"/>
+<text x="452.0" y="48.0" font-size="28" fill="#FFFFFF" font-weight="bold">A1-22 全栈国密的密文大模型推理系统 · 实现过程全流程图</text>
+<text x="412.5" y="73.0" font-size="14" fill="#A5B4CF">第十一届全国密码技术竞赛复赛 ｜ 阶段门工作流 P0~P7（每阶段停下等团队评审）+ 模式 B 运行时数据流 ｜ 2026-09-25 ~ 09-30</text>
+<rect x="70" y="110" width="16" height="16" rx="4" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<text x="94.0" y="124.0" font-size="14" fill="#475569">阶段交付</text>
+<rect x="176.0" y="110" width="16" height="16" rx="4" fill="#ECFDF5" stroke="#10B981" stroke-width="2"/>
+<text x="200.0" y="124.0" font-size="14" fill="#475569">评审一次通过</text>
+<rect x="310.0" y="110" width="16" height="16" rx="4" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+<text x="334.0" y="124.0" font-size="14" fill="#475569">退回→R 整改→复审</text>
+<rect x="485.0" y="110" width="16" height="16" rx="4" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+<text x="509.0" y="124.0" font-size="14" fill="#475569">事故</text>
+<rect x="563.0" y="110" width="16" height="16" rx="4" fill="#FFFFFF" stroke="#94A3B8" stroke-width="2"/>
+<text x="587.0" y="124.0" font-size="14" fill="#475569">虚线=R 整改明细</text>
+<rect x="0" y="144" width="1640" height="46" rx="0" fill="#1E293B"/>
+<text x="84.0" y="177.0" font-size="20" fill="#FFFFFF" font-weight="bold">壹 · 研发过程 —— 阶段门工作流（P0~P7 · 8 轮 R 整改）</text>
+<line x1="400" y1="212" x2="400" y2="223" stroke="#475569" stroke-width="2"/>
+<polygon points="395,222 405,222 400,232" fill="#475569"/>
+<rect x="215.0" y="234" width="370.0" height="46" rx="23.0" fill="#1E293B"/>
+<text x="245.0" y="267.0" font-size="16" fill="#FFFFFF" font-weight="bold">团队任务书 A1-22（大模型隐私保护推理）</text>
+<text x="88.0" y="297.0" font-size="14" fill="#475569">阶段门约定：每阶段末 = 工作记录 MD + pN.zip + 阶段报告 → 停下等评审签字，禁止跳门连续开发</text>
+<line x1="400" y1="314" x2="400" y2="325" stroke="#475569" stroke-width="2"/>
+<polygon points="395,324 405,324 400,334" fill="#475569"/>
+<rect x="70" y="336" width="660" height="154" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<rect x="70" y="336" width="6" height="154" rx="3" fill="#2563EB"/>
+<text x="92.0" y="372.0" font-size="20" fill="#1D4ED8" font-weight="bold">P0  环境与明文基线</text>
+<rect x="620.0" y="349" width="96.0" height="24" rx="12" fill="#DBEAFE"/>
+<text x="630.0" y="368.0" font-size="13" fill="#1D4ED8" font-weight="bold">2026-09-25</text>
+<text x="92.0" y="400.0" font-size="15" fill="#0F172A">· 环境落位：Windows venv / CPU-only / 32GB；模型三件套（BERT 微调 acc</text>
+<text x="92.0" y="422.0" font-size="15" fill="#0F172A">99.0%、GPT-2）</text>
+<text x="92.0" y="444.0" font-size="15" fill="#0F172A">· perf_runner 明文基线（threads=8 锁定）：GPT-2 P50 792.4ms / BERT P50 38.4ms</text>
+<text x="92.0" y="466.0" font-size="15" fill="#0F172A">· 口径声明：同机单轮绝对时延不作跨阶段锚点，以多轮区间呈现</text>
+<line x1="400" y1="490" x2="400" y2="505" stroke="#475569" stroke-width="2"/>
+<polygon points="395,504 405,504 400,514" fill="#475569"/>
+<rect x="296.0" y="514" width="208.0" height="36" rx="18" fill="#ECFDF5" stroke="#10B981" stroke-width="2"/>
+<text x="318.0" y="539.0" font-size="15" fill="#047857" font-weight="bold">评审门 ① —— 一次通过</text>
+<line x1="400" y1="550" x2="400" y2="565" stroke="#475569" stroke-width="2"/>
+<polygon points="395,564 405,564 400,574" fill="#475569"/>
+<rect x="70" y="574" width="660" height="110" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<rect x="70" y="574" width="6" height="110" rx="3" fill="#2563EB"/>
+<text x="92.0" y="610.0" font-size="20" fill="#1D4ED8" font-weight="bold">P1  架构与协议规格</text>
+<rect x="602.0" y="587" width="114.0" height="24" rx="12" fill="#DBEAFE"/>
+<text x="612.0" y="606.0" font-size="13" fill="#1D4ED8" font-weight="bold">09-25 ~ 09-26</text>
+<text x="92.0" y="638.0" font-size="15" fill="#0F172A">· 三方职责 P0 / P1 / P2 + 消息序列 S1~S8 + D5 域转换协议设计</text>
+<text x="92.0" y="660.0" font-size="15" fill="#0F172A">· 定点化方案：激活 Q16；GPT-2 权重 Q22 / BERT 权重 INT8</text>
+<line x1="400" y1="684" x2="400" y2="699" stroke="#475569" stroke-width="2"/>
+<polygon points="395,698 405,698 400,708" fill="#475569"/>
+<rect x="218.5" y="708" width="363.0" height="36" rx="18" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+<text x="240.5" y="733.0" font-size="15" fill="#B45309" font-weight="bold">评审门 ② —— 退回 → P1-R1 整改 → 复审通过</text>
+<rect x="830" y="710.0" width="700" height="90" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="846.0" y="739.0" font-size="16" fill="#B45309" font-weight="bold">P1-R1 · D5 职责修订</text>
+<text x="846.0" y="761.0" font-size="14" fill="#0F172A">解密白名单收口 P0（单钥掩码解密 + 最终输出两处）；P1/P2 不持 CKKS 私钥；真门限 = OpenFHE</text>
+<text x="846.0" y="782.0" font-size="14" fill="#0F172A">扩展（s² 交叉项不可聚合），如实申报。</text>
+<line x1="585.5" y1="726.0" x2="819" y2="726.0" stroke="#D97706" stroke-width="2" stroke-dasharray="6 4"/>
+<polygon points="818,721.0 818,731.0 828,726.0" fill="#D97706"/>
+<line x1="400" y1="744" x2="400" y2="759" stroke="#475569" stroke-width="2"/>
+<polygon points="395,758 405,758 400,768" fill="#475569"/>
+<rect x="70" y="768" width="660" height="132" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<rect x="70" y="768" width="6" height="132" rx="3" fill="#2563EB"/>
+<text x="92.0" y="804.0" font-size="20" fill="#1D4ED8" font-weight="bold">P2  密码原语层</text>
+<rect x="658.0" y="781" width="58.0" height="24" rx="12" fill="#DBEAFE"/>
+<text x="668.0" y="800.0" font-size="13" fill="#1D4ED8" font-weight="bold">09-26</text>
+<text x="92.0" y="832.0" font-size="15" fill="#0F172A">· CKKS 封装（TenSEAL / SEAL，本栈上限 2^15）+ BSGS 明文旋转</text>
+<text x="92.0" y="854.0" font-size="15" fill="#0F172A">· SM2DH 密钥协商（GB/T 32918.3）；SM4-GCM 自实现（gmssl 无 GCM）</text>
+<text x="92.0" y="876.0" font-size="15" fill="#0F172A">· 定点化实测：激活 Q16 + 权重 Q22，一致率 100%</text>
+<line x1="400" y1="900" x2="400" y2="915" stroke="#475569" stroke-width="2"/>
+<polygon points="395,914 405,914 400,924" fill="#475569"/>
+<rect x="218.5" y="924" width="363.0" height="36" rx="18" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+<text x="240.5" y="949.0" font-size="15" fill="#B45309" font-weight="bold">评审门 ③ —— 退回 → P2-R1 整改 → 复审通过</text>
+<rect x="830" y="926.0" width="700" height="90" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="846.0" y="955.0" font-size="16" fill="#B45309" font-weight="bold">P2-R1 · GCM 计数器偏移修复</text>
+<text x="846.0" y="977.0" font-size="14" fill="#0F172A">自洽 / 篡改 / 代数测试均无法发现，RFC 8998 附录 A.1</text>
+<text x="846.0" y="998.0" font-size="14" fill="#0F172A">外部标准向量锚定后才暴露。教训入库：密码组合层必须锚定外部标准向量。</text>
+<line x1="585.5" y1="942.0" x2="819" y2="942.0" stroke="#D97706" stroke-width="2" stroke-dasharray="6 4"/>
+<polygon points="818,937.0 818,947.0 828,942.0" fill="#D97706"/>
+<line x1="400" y1="960" x2="400" y2="975" stroke="#475569" stroke-width="2"/>
+<polygon points="395,974 405,974 400,984" fill="#475569"/>
+<rect x="70" y="984" width="660" height="58" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+<text x="88.0" y="1008.0" font-size="15" fill="#B91C1C" font-weight="bold">★ 搬迁事故 2026-09-26：C 盘损坏致仓库一度丢失 → D 盘重建（551554c）</text>
+<text x="88.0" y="1031.0" font-size="14" fill="#B91C1C">P0~P2 提交链丢失如实申报（总结报告工时代理口径：挂机不等于净开发）</text>
+<line x1="400" y1="1042" x2="400" y2="1057" stroke="#475569" stroke-width="2"/>
+<polygon points="395,1056 405,1056 400,1066" fill="#475569"/>
+<rect x="70" y="1066" width="660" height="154" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<rect x="70" y="1066" width="6" height="154" rx="3" fill="#2563EB"/>
+<text x="92.0" y="1102.0" font-size="20" fill="#1D4ED8" font-weight="bold">P3  密文推理管线</text>
+<rect x="602.0" y="1079" width="114.0" height="24" rx="12" fill="#DBEAFE"/>
+<text x="612.0" y="1098.0" font-size="13" fill="#1D4ED8" font-weight="bold">09-26 ~ 09-27</text>
+<text x="92.0" y="1130.0" font-size="15" fill="#0F172A">· 模式 B 端到端贯通（玩具参数 TC128 / N=4096）：CKKS 线性 + MPC 非线性 + 域转换</text>
+<text x="92.0" y="1152.0" font-size="15" fill="#0F172A">· 评审退回（A~I 数值验证链缺口）→ 整改后管线输出与明文截断参考一致（0.614=0.614）</text>
+<text x="92.0" y="1174.0" font-size="15" fill="#0F172A">· 诚实发现：截断参考 n≤6 层为随机水平（0.50）——修正判据口径，不编数字</text>
+<text x="92.0" y="1196.0" font-size="15" fill="#0F172A">· [K] 220 prompts 程序化生成入库；密文 / 明文一致率 1.0000</text>
+<line x1="400" y1="1220" x2="400" y2="1235" stroke="#475569" stroke-width="2"/>
+<polygon points="395,1234 405,1234 400,1244" fill="#475569"/>
+<rect x="192.0" y="1244" width="416.0" height="36" rx="18" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+<text x="214.0" y="1269.0" font-size="15" fill="#B45309" font-weight="bold">评审门 ④ —— 退回（A~I）→ P3-R1 整改 → 复审通过</text>
+<rect x="830" y="1246.0" width="700" height="90" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="846.0" y="1275.0" font-size="16" fill="#B45309" font-weight="bold">P3-R1 · 4 个结构性数值 bug</text>
+<text x="846.0" y="1297.0" font-size="14" fill="#0F172A">转换掩码未重构（y₁ 未减 r，总根因）/ FFN 权重切片转置 / 残差加破坏双拷贝布局 / post-LN</text>
+<text x="846.0" y="1318.0" font-size="14" fill="#0F172A">两处缺失；「严格≤8」声明更正为实测 |score|=12.3。</text>
+<line x1="612.0" y1="1262.0" x2="819" y2="1262.0" stroke="#D97706" stroke-width="2" stroke-dasharray="6 4"/>
+<polygon points="818,1257.0 818,1267.0 828,1262.0" fill="#D97706"/>
+<line x1="400" y1="1280" x2="400" y2="1295" stroke="#475569" stroke-width="2"/>
+<polygon points="395,1294 405,1294 400,1304" fill="#475569"/>
+<rect x="70" y="1304" width="660" height="132" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<rect x="70" y="1304" width="6" height="132" rx="3" fill="#2563EB"/>
+<text x="92.0" y="1340.0" font-size="20" fill="#1D4ED8" font-weight="bold">P4  认证与密钥全生命周期</text>
+<rect x="658.0" y="1317" width="58.0" height="24" rx="12" fill="#DBEAFE"/>
+<text x="668.0" y="1336.0" font-size="13" fill="#1D4ED8" font-weight="bold">09-27</text>
+<text x="92.0" y="1368.0" font-size="15" fill="#0F172A">· X.509v3 证书 + SM2 挑战响应认证；SM2DH 会话 + SM4-GCM 安全通道 + ratchet 轮换</text>
+<text x="92.0" y="1390.0" font-size="15" fill="#0F172A">· 密钥注册 / 轮换 / 覆写销毁；SM3 审计哈希链（append-only 防篡改）</text>
+<text x="92.0" y="1412.0" font-size="15" fill="#0F172A">· D5 真实路径落地：入口密文域加 Enc(r) → P0 白名单①掩码解密；转换数公式 10n/轮</text>
+<line x1="400" y1="1436" x2="400" y2="1451" stroke="#475569" stroke-width="2"/>
+<polygon points="395,1450 405,1450 400,1460" fill="#475569"/>
+<rect x="247.0" y="1460" width="306.0" height="36" rx="18" fill="#ECFDF5" stroke="#10B981" stroke-width="2"/>
+<text x="269.0" y="1485.0" font-size="15" fill="#047857" font-weight="bold">评审门 ⑤ —— 一次通过（P4 无退回）</text>
+<line x1="400" y1="1496" x2="400" y2="1511" stroke="#475569" stroke-width="2"/>
+<polygon points="395,1510 405,1510 400,1520" fill="#475569"/>
+<rect x="70" y="1520" width="660" height="154" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<rect x="70" y="1520" width="6" height="154" rx="3" fill="#2563EB"/>
+<text x="92.0" y="1556.0" font-size="20" fill="#1D4ED8" font-weight="bold">P5  威胁模型与攻击套件</text>
+<rect x="658.0" y="1533" width="58.0" height="24" rx="12" fill="#DBEAFE"/>
+<text x="668.0" y="1552.0" font-size="13" fill="#1D4ED8" font-weight="bold">09-28</text>
+<text x="92.0" y="1584.0" font-size="15" fill="#0F172A">· 威胁模型终稿：对手表 A1~A5、假设 A-1~A-9、三列映射表、半诚实模拟器论证</text>
+<text x="92.0" y="1606.0" font-size="15" fill="#0F172A">· 5 类攻击自动化（窃听 / MITM / 篡改 / 重放 / 合谋）：38 项零告警；判定 28 防御 + 2</text>
+<text x="92.0" y="1628.0" font-size="15" fill="#0F172A">边界 + 0 失败</text>
+<text x="92.0" y="1650.0" font-size="15" fill="#0F172A">· F8 边界演示：模式 B t=2 合谋可恢复 token（预先申报）；模式 A 重加密防御成功</text>
+<line x1="400" y1="1674" x2="400" y2="1689" stroke="#475569" stroke-width="2"/>
+<polygon points="395,1688 405,1688 400,1698" fill="#475569"/>
+<rect x="202.5" y="1698" width="395.0" height="36" rx="18" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+<text x="224.5" y="1723.0" font-size="15" fill="#B45309" font-weight="bold">评审门 ⑥ —— 退回 6 项 → P5-R1 整改 → 复审通过</text>
+<rect x="830" y="1700.0" width="700" height="90" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="846.0" y="1729.0" font-size="16" fill="#B45309" font-weight="bold">P5-R1 · 交付红线整改</text>
+<text x="846.0" y="1751.0" font-size="14" fill="#0F172A">estimator 第 4 次未以可验证形态交付 → 原生日志存档入包 + JSON 如实重解析 + 登记</text>
+<text x="846.0" y="1772.0" font-size="14" fill="#0F172A">[x]→[~]。教训：引用的数据 / 日志必须随包交付，中途修复以重跑产物为准。</text>
+<line x1="601.5" y1="1716.0" x2="819" y2="1716.0" stroke="#D97706" stroke-width="2" stroke-dasharray="6 4"/>
+<polygon points="818,1711.0 818,1721.0 828,1716.0" fill="#D97706"/>
+<line x1="400" y1="1734" x2="400" y2="1749" stroke="#475569" stroke-width="2"/>
+<polygon points="395,1748 405,1748 400,1758" fill="#475569"/>
+<rect x="70" y="1758" width="660" height="176" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<rect x="70" y="1758" width="6" height="176" rx="3" fill="#2563EB"/>
+<text x="92.0" y="1794.0" font-size="20" fill="#1D4ED8" font-weight="bold">P6  性能与基线对比</text>
+<rect x="602.0" y="1771" width="114.0" height="24" rx="12" fill="#DBEAFE"/>
+<text x="612.0" y="1790.0" font-size="13" fill="#1D4ED8" font-weight="bold">09-28 ~ 09-29</text>
+<text x="92.0" y="1822.0" font-size="15" fill="#0F172A">· run_full_bench 四项资源指标 + 密文矩阵 20/20×3：4/8/12 层 P50</text>
+<text x="92.0" y="1844.0" font-size="15" fill="#0F172A">121.7/237.7/371.8s（max 8.3/11.4/15.7 GiB）</text>
+<text x="92.0" y="1866.0" font-size="15" fill="#0F172A">· ★ 事故：矩阵 OOM 三连 → 确定性复现证明 → 逐层子进程隔离 + 分段合并（必要修复）</text>
+<text x="92.0" y="1888.0" font-size="15" fill="#0F172A">· 创新点：C2 体积 -34.1%@一致率 1.000（312.7MB）；C3 row-sum 慢</text>
+<text x="92.0" y="1910.0" font-size="15" fill="#0F172A">5.39×/5.14×（诚实负结果）</text>
+<line x1="400" y1="1934" x2="400" y2="1949" stroke="#475569" stroke-width="2"/>
+<polygon points="395,1948 405,1948 400,1958" fill="#475569"/>
+<rect x="215.0" y="1958" width="370.0" height="36" rx="18" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+<text x="237.0" y="1983.0" font-size="15" fill="#B45309" font-weight="bold">评审门 ⑦ —— 退回 R1/R2/R3 三轮 → 复审通过</text>
+<rect x="830" y="1960.0" width="700" height="111" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="846.0" y="1989.0" font-size="16" fill="#B45309" font-weight="bold">P6-R1/R2/R3 · 三轮整改</text>
+<text x="846.0" y="2011.0" font-size="14" fill="#0F172A">R1 矩阵表改 P50/max 双列 + 最长轮披露；R2 交付包重发包回填；R3 estimator 双输出路径（smoke</text>
+<text x="846.0" y="2032.0" font-size="14" fill="#0F172A">覆盖决策 JSON 事故）+ 三处 --segmented 命令同步。教训：手改数字必须从 JSON</text>
+<text x="846.0" y="2053.0" font-size="14" fill="#0F172A">重算；修「验证」必须含「原数据还在不在」对账。</text>
+<line x1="589.0" y1="1976.0" x2="819" y2="1976.0" stroke="#D97706" stroke-width="2" stroke-dasharray="6 4"/>
+<polygon points="818,1971.0 818,1981.0 828,1976.0" fill="#D97706"/>
+<line x1="400" y1="1994" x2="400" y2="2009" stroke="#475569" stroke-width="2"/>
+<polygon points="395,2008 405,2008 400,2018" fill="#475569"/>
+<rect x="70" y="2018" width="660" height="176" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+<rect x="70" y="2018" width="6" height="176" rx="3" fill="#2563EB"/>
+<text x="92.0" y="2054.0" font-size="20" fill="#1D4ED8" font-weight="bold">P7  演示系统与参赛交付</text>
+<rect x="602.0" y="2031" width="114.0" height="24" rx="12" fill="#DBEAFE"/>
+<text x="612.0" y="2050.0" font-size="13" fill="#1D4ED8" font-weight="bold">09-29 ~ 09-30</text>
+<text x="92.0" y="2082.0" font-size="15" fill="#0F172A">· FastAPI 演示系统（2 场景 · 全模拟数据）+ 稳定性 10/10：p50 58.68s / max 141.63s /</text>
+<text x="92.0" y="2104.0" font-size="15" fill="#0F172A">内存 max 5607.9 MiB</text>
+<text x="92.0" y="2126.0" font-size="15" fill="#0F172A">· 7 文档终稿 + 数据字典 93 条 + 四检门禁 EXIT=0；答辩 PPT 提纲 12 页 + 评委 Q&amp;A 20 条</text>
+<text x="92.0" y="2148.0" font-size="15" fill="#0F172A">· F1~F10：8 √ + 2 √*（范围申报）+ 0 ×；测试终态 243 passed + 16 deselected + 3</text>
+<text x="92.0" y="2170.0" font-size="15" fill="#0F172A">xfailed</text>
+<line x1="400" y1="2194" x2="400" y2="2209" stroke="#475569" stroke-width="2"/>
+<polygon points="395,2208 405,2208 400,2218" fill="#475569"/>
+<rect x="219.5" y="2218" width="361.0" height="36" rx="18" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+<text x="241.5" y="2243.0" font-size="15" fill="#B45309" font-weight="bold">终检 —— 必修 2 项 → P7-R1 整改 → 终检通过</text>
+<rect x="830" y="2220.0" width="700" height="90" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="846.0" y="2249.0" font-size="16" fill="#B45309" font-weight="bold">P7-R1 · 完整性收口</text>
+<text x="846.0" y="2271.0" font-size="14" fill="#0F172A">①「200 并发验证」虚报 → 补固化 test_concurrent_append_200（200 线程并发 append，verify</text>
+<text x="846.0" y="2292.0" font-size="14" fill="#0F172A">全链通过）；②登记表 P7 节对账 + 00 差距清单第 6 条 + [L] 终裁注记。</text>
+<line x1="584.5" y1="2236.0" x2="819" y2="2236.0" stroke="#D97706" stroke-width="2" stroke-dasharray="6 4"/>
+<polygon points="818,2231.0 818,2241.0 828,2236.0" fill="#D97706"/>
+<line x1="400" y1="2254" x2="400" y2="2269" stroke="#475569" stroke-width="2"/>
+<polygon points="395,2268 405,2268 400,2278" fill="#475569"/>
+<line x1="400" y1="2278" x2="400" y2="2289" stroke="#475569" stroke-width="2"/>
+<polygon points="395,2288 405,2288 400,2298" fill="#475569"/>
+<rect x="49.5" y="2300" width="701.0" height="46" rx="23.0" fill="#059669"/>
+<text x="79.5" y="2333.0" font-size="16" fill="#FFFFFF" font-weight="bold">P0~P7 全链交付成立：8 个阶段包 + sha256 上架 GitHub（k4N0SAKU/lyuhan123）</text>
+<text x="41.0" y="2363.0" font-size="14" fill="#475569">仓库体检补传：README 重写（访客口径）· 评审记录断档回填 P4~P7 · 答辩包三件（导读 / 全过程 / 赛前执行包）</text>
+<rect x="0" y="2422" width="1640" height="46" rx="0" fill="#1E293B"/>
+<text x="84.0" y="2455.0" font-size="20" fill="#FFFFFF" font-weight="bold">贰 · 系统运行时 —— 模式 B 密文推理数据流（一次分类请求）</text>
+<rect x="70" y="2492" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2492" width="6" height="42" rx="3" fill="#334155"/>
+<text x="202.0" y="2517.0" font-size="15" fill="#0F172A">①  会话建立：X.509v3 证书交换 + SM2 挑战响应 → SM2DH（GB/T 32918.3）会话密钥 → SM4-GCM 加密帧 + ratchet 轮换（下述全程复用）</text>
+<rect x="90" y="2501.0" width="48.0" height="24" rx="12" fill="#334155"/>
+<text x="99.0" y="2520.0" font-size="13" fill="#FFFFFF" font-weight="bold">全 员</text>
+<line x1="760.0" y1="2534" x2="760.0" y2="2543" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,2542 765.0,2542 760.0,2552" fill="#475569"/>
+<rect x="70" y="2554" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2554" width="6" height="42" rx="3" fill="#2563EB"/>
+<text x="202.0" y="2579.0" font-size="15" fill="#0F172A">②  输入分词 → 嵌入 → 定点化（Q16）→ CKKS 加密（P0 独持 CKKS 私钥；P1/P2 无私钥材料）</text>
+<rect x="90" y="2563.0" width="78.0" height="24" rx="12" fill="#2563EB"/>
+<text x="99.0" y="2582.0" font-size="13" fill="#FFFFFF" font-weight="bold">P0 客户端</text>
+<line x1="760.0" y1="2596" x2="760.0" y2="2605" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,2604 765.0,2604 760.0,2614" fill="#475569"/>
+<rect x="70" y="2616" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2616" width="6" height="42" rx="3" fill="#2563EB"/>
+<text x="202.0" y="2641.0" font-size="15" fill="#0F172A">③  INFER_REQUEST 经 SM4-GCM 通道下发（密文嵌入向量）</text>
+<rect x="90" y="2625.0" width="78.0" height="24" rx="12" fill="#2563EB"/>
+<text x="99.0" y="2644.0" font-size="13" fill="#FFFFFF" font-weight="bold">P0 客户端</text>
+<line x1="760.0" y1="2658" x2="760.0" y2="2667" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,2666 765.0,2666 760.0,2676" fill="#475569"/>
+<rect x="70" y="2678" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2678" width="6" height="42" rx="3" fill="#7C3AED"/>
+<text x="202.0" y="2703.0" font-size="15" fill="#0F172A">④  CKKS 线性层同态计算：QKV / FFN（BSGS 明文旋转；768×768 单线性层约 4.2~4.5s @CPU）</text>
+<rect x="90" y="2687.0" width="78.0" height="24" rx="12" fill="#7C3AED"/>
+<text x="99.0" y="2706.0" font-size="13" fill="#FFFFFF" font-weight="bold">P2 计算方</text>
+<line x1="760.0" y1="2720" x2="760.0" y2="2729" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,2728 765.0,2728 760.0,2738" fill="#475569"/>
+<rect x="70" y="2740" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2740" width="6" height="42" rx="3" fill="#7C3AED"/>
+<text x="202.0" y="2765.0" font-size="15" fill="#0F172A">⑤  转换入口：密文域加 Enc(r)（转换掩码按目标精确 scale 编码，掩码值 ≤2^20）</text>
+<rect x="90" y="2749.0" width="78.0" height="24" rx="12" fill="#7C3AED"/>
+<text x="99.0" y="2768.0" font-size="13" fill="#FFFFFF" font-weight="bold">P2 计算方</text>
+<line x1="760.0" y1="2782" x2="760.0" y2="2791" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,2790 765.0,2790 760.0,2800" fill="#475569"/>
+<rect x="70" y="2802" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2802" width="6" height="42" rx="3" fill="#2563EB"/>
+<text x="202.0" y="2827.0" font-size="15" fill="#0F172A">⑥  白名单① 掩码解密：x + r → y₁（单钥；解密白名单 = 掩码值域 + 最终输出，见 D5）</text>
+<rect x="90" y="2811.0" width="78.0" height="24" rx="12" fill="#2563EB"/>
+<text x="99.0" y="2830.0" font-size="13" fill="#FFFFFF" font-weight="bold">P0 客户端</text>
+<line x1="760.0" y1="2844" x2="760.0" y2="2853" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,2852 765.0,2852 760.0,2862" fill="#475569"/>
+<rect x="70" y="2864" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2864" width="6" height="42" rx="3" fill="#2563EB"/>
+<text x="202.0" y="2889.0" font-size="15" fill="#0F172A">⑦  y₁ 分发：P1 收 y₁ / P2 持 -r（掩码重构）</text>
+<rect x="90" y="2873.0" width="78.0" height="24" rx="12" fill="#2563EB"/>
+<text x="99.0" y="2892.0" font-size="13" fill="#FFFFFF" font-weight="bold">P0 客户端</text>
+<line x1="760.0" y1="2906" x2="760.0" y2="2915" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,2914 765.0,2914 760.0,2924" fill="#475569"/>
+<rect x="70" y="2926" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2926" width="6" height="42" rx="3" fill="#059669"/>
+<text x="202.0" y="2951.0" font-size="15" fill="#0F172A">⑧  MPC 非线性：GELU / Softmax 在加性秘密分享域计算</text>
+<rect x="90" y="2935.0" width="78.0" height="24" rx="12" fill="#059669"/>
+<text x="99.0" y="2954.0" font-size="13" fill="#FFFFFF" font-weight="bold">P1 计算方</text>
+<line x1="760.0" y1="2968" x2="760.0" y2="2977" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,2976 765.0,2976 760.0,2986" fill="#475569"/>
+<rect x="70" y="2988" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="2988" width="6" height="42" rx="3" fill="#059669"/>
+<text x="202.0" y="3013.0" font-size="15" fill="#0F172A">⑨  RECRYPT：P1 掩码 s → P2 合成 fresh 密文 Enc(v) = Enc(w) - Enc(s) → 残差加 + LayerNorm（CKKS 域）→ 下一层</text>
+<rect x="90" y="2997.0" width="78.0" height="24" rx="12" fill="#059669"/>
+<text x="99.0" y="3016.0" font-size="13" fill="#FFFFFF" font-weight="bold">P1 计算方</text>
+<line x1="760.0" y1="3030" x2="760.0" y2="3039" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,3038 765.0,3038 760.0,3048" fill="#475569"/>
+<rect x="70" y="3050" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="3050" width="6" height="42" rx="3" fill="#2563EB"/>
+<text x="202.0" y="3075.0" font-size="15" fill="#0F172A">⑩  INFER_RESULT：logits 密文回传 → 白名单② 最终解密 → 分类标签输出（P0）</text>
+<rect x="90" y="3059.0" width="78.0" height="24" rx="12" fill="#2563EB"/>
+<text x="99.0" y="3078.0" font-size="13" fill="#FFFFFF" font-weight="bold">P0 客户端</text>
+<line x1="760.0" y1="3092" x2="760.0" y2="3101" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,3100 765.0,3100 760.0,3110" fill="#475569"/>
+<rect x="70" y="3116" width="1380" height="42" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2"/>
+<rect x="70" y="3116" width="6" height="42" rx="3" fill="#334155"/>
+<text x="202.0" y="3141.0" font-size="15" fill="#0F172A">◆  安全基线全程横贯：SM4-GCM 通道 + ratchet 轮换 ｜ SM3 审计哈希链 append-only ｜ 密钥销毁 = 内存覆写 ｜ A122_DEBUG_INTERMEDIATE 默认关闭</text>
+<rect x="90" y="3125.0" width="48.0" height="24" rx="12" fill="#334155"/>
+<text x="99.0" y="3144.0" font-size="13" fill="#FFFFFF" font-weight="bold">全 员</text>
+<line x1="760.0" y1="3158" x2="760.0" y2="3167" stroke="#475569" stroke-width="2"/>
+<polygon points="755.0,3166 765.0,3166 760.0,3176" fill="#475569"/>
+<line x1="1450" y1="3030" x2="1530" y2="3030" stroke="#D97706" stroke-width="2" stroke-dasharray="6 4"/>
+<line x1="1530" y1="2699.0" x2="1530" y2="2705.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2709.0" x2="1530" y2="2715.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2719.0" x2="1530" y2="2725.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2729.0" x2="1530" y2="2735.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2739.0" x2="1530" y2="2745.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2749.0" x2="1530" y2="2755.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2759.0" x2="1530" y2="2765.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2769.0" x2="1530" y2="2775.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2779.0" x2="1530" y2="2785.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2789.0" x2="1530" y2="2795.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2799.0" x2="1530" y2="2805.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2809.0" x2="1530" y2="2815.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2819.0" x2="1530" y2="2825.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2829.0" x2="1530" y2="2835.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2839.0" x2="1530" y2="2845.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2849.0" x2="1530" y2="2855.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2859.0" x2="1530" y2="2865.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2869.0" x2="1530" y2="2875.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2879.0" x2="1530" y2="2885.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2889.0" x2="1530" y2="2895.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2899.0" x2="1530" y2="2905.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2909.0" x2="1530" y2="2915.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2919.0" x2="1530" y2="2925.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2929.0" x2="1530" y2="2935.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2939.0" x2="1530" y2="2945.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2949.0" x2="1530" y2="2955.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2959.0" x2="1530" y2="2965.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2969.0" x2="1530" y2="2975.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2979.0" x2="1530" y2="2985.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2989.0" x2="1530" y2="2995.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2999.0" x2="1530" y2="3005.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="3009.0" x2="1530" y2="3015.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="3019.0" x2="1530" y2="3025.0" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="3029.0" x2="1530" y2="3030" stroke="#D97706" stroke-width="2"/>
+<line x1="1530" y1="2699.0" x2="1460" y2="2699.0" stroke="#D97706" stroke-width="2" stroke-dasharray="6 4"/>
+<polygon points="1462,2694.0 1462,2704.0 1452,2699.0" fill="#D97706"/>
+<text x="1540.0" y="2950.0" font-size="15" fill="#B45309" font-weight="bold">循环</text>
+<text x="1540.0" y="2970.0" font-size="15" fill="#B45309" font-weight="bold">×12 层</text>
+<text x="1540.0" y="2992.0" font-size="13" fill="#B45309">每层域转换</text>
+<text x="1540.0" y="3010.0" font-size="13" fill="#B45309">10n 次</text>
+<rect x="0" y="3210" width="1640" height="42" rx="0" fill="#F1F5F9"/>
+<text x="448.0" y="3236.0" font-size="14" fill="#475569">图内全部数字均为交付包实测值（数据字典 93 条 · 四检门禁），与 p0~p7.zip 及 GitHub 仓库一致 ｜ 生成 2026-09-30</text>
+</svg>
