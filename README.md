@@ -401,6 +401,7 @@ MANIFEST + sha256）+ 阶段报告，评审通过后进入下一阶段；全部�
 | [docs/glossary.md](docs/glossary.md) | 术语表 |
 | [docs/code-walkthrough.md](docs/code-walkthrough.md) | 模块代码导读（按模块讲"这段代码在干嘛"） |
 | [docs/project-overview.md](docs/project-overview.md) | 项目详细介绍与全过程 |
+| [docs/项目解释书.md](docs/项目解释书.md) | 项目解释书（记号约定/架构与信任边界/准备知识/协议设计/工程纪律/逐阶段实现/时序走查/结果口径导航/诚实边界/FAQ/术语速查） |
 | [docs/phases/](docs/phases) | P0~P7 工作记录 + 项目总结报告 + 阶段任务登记 |
 
 ## 14. License
